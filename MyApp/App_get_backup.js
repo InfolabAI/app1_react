@@ -274,35 +274,26 @@ function ReviewScreen({ route }) {
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    // AWS API Gateway + Lambda 엔드포인트 (POST로 호출)
-    const LAMBDA_URL = 'https://2frhmnck64.execute-api.ap-northeast-2.amazonaws.com/crawlF';
+    const SERVER_URL = 'http://10.0.2.2:5000';
 
-    fetch(LAMBDA_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ app_id: appId }),  // 예: { "app_id": "com.nianticlabs.pokemongo" }
-    })
+    fetch(`${SERVER_URL}/reviews/${appId}`)
       .then((response) => {
         if (!response.ok) {
           throw new Error(`HTTP error: ${response.status}`);
         }
-        return response.json(); // 이미 JSON 배열 반환
+        return response.json();
       })
       .then((data) => {
-        // data가 [{ at: '2025-03-12 ...', score: 1, content: '...' }, ...] 라고 가정
-        if (!Array.isArray(data) || data.length === 0) {
+        if (!data || data.length === 0) {
           setError(true);
         } else {
           setReviews(data);
         }
+        setLoading(false);
       })
       .catch((err) => {
         console.error(err);
         setError(true);
-      })
-      .finally(() => {
         setLoading(false);
       });
   }, [appId]);

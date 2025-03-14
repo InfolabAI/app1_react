@@ -24,6 +24,7 @@ def main():
             # 응답 본문(JSON) 파싱
             data = response.json()
             print("Response JSON:")
+            breakpoint()
             print(json.dumps(data, ensure_ascii=False, indent=2))
         else:
             print("Error occurred:", response.text)

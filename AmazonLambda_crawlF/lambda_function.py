@@ -31,6 +31,7 @@ def lambda_handler(event, context):
             return "No Reviews Found", 200
 
         df_tmp = df[['at', 'score', 'content']]
+        df_tmp['at'] = df_tmp['at'].astype(str)
 
         # 4) 방금 저장한 데이터(또는 전체)를 바로 JSON으로 반환
         #    여기선 "오늘" 날짜 등을 필터링할 수도 있지만,
@@ -46,7 +47,7 @@ def lambda_handler(event, context):
         # 결과 반환
         return {
             "statusCode": 200,
-            "body": json.dumps(json_str)
+            "body": json_str
         }
 
     except Exception as e:
