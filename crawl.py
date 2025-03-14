@@ -1,6 +1,7 @@
 from google_play_scraper import Sort, reviews_all, reviews
 from google_play_scraper import app
 import pandas as pd
+from manage_mysql import HOST, USER, PASSWORD, DB_NAME, TABLE_NAME, create_db_and_table, insert_df_data, get_data_by_date_range
 
 result = app(
     'com.nianticlabs.pokemongo',
@@ -22,7 +23,14 @@ result, continuation_token = reviews(
 # ['reviewId', 'userName', 'userImage', 'content', 'score', 'thumbsUpCount', 'reviewCreatedVersion', 'at', 'replyContent', 'repliedAt', 'appVersion']
 df = pd.DataFrame(result)
 
-breakpoint()
+df.content.to_string()
+df_tmp = df[['at', 'score', 'content']]
+with open('pokemongo_reviews.txt', 'w') as f:
+    for i in range(len(df_tmp)):
+        f.write(f"일자: {str(df_tmp['at'][i])}\n")
+        f.write(f"점수: {str(df_tmp['score'][i])}\n")
+        f.write(f"내용: {df_tmp['content'][i]}\n\n")
+
 print()
 
 # result = reviews_all(
