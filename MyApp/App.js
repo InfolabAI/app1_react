@@ -295,7 +295,10 @@ function ReviewScreen({ route }) {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ app_id: appId }),  // 예: { "app_id": "com.nianticlabs.pokemongo" }
+      body: JSON.stringify({
+        app_id: appId,
+        is_summary: 'false'
+      }),  // 예: { "app_id": "com.nianticlabs.pokemongo" }
     })
       .then((response) => {
         if (!response.ok) {
@@ -341,7 +344,7 @@ function ReviewScreen({ route }) {
 
   const renderItem = ({ item }) => (
     <View style={styles.reviewItemContainer}>
-      <PaperText>{`날짜: ${item.at}`}</PaperText>
+      <PaperText>{`날짜: ${item.date}`}</PaperText>
       <PaperText>{`평점: ${item.score}`}</PaperText>
       <PaperText>{`내용: ${item.content}`}</PaperText>
     </View>

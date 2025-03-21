@@ -10,12 +10,15 @@ def main():
     # 호출할 앱의 packageName (Google Play ID)
     # 예) 'com.nianticlabs.pokemongo' 등
     payload = {
-        "app_id": "com.nianticlabs.pokemongo"
+        "app_id": "com.nianticlabs.pokemongo",
+        "is_summary": "true"
     }
 
     try:
         # POST 요청으로 JSON 데이터를 보냄
         response = requests.post(url, json=payload)
+
+        print(response.text)
 
         # 상태 코드 확인
         print("Status Code:", response.status_code)
