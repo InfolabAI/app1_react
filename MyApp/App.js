@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 
 // React Navigation
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, DarkTheme as NavDarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 // React Native Paper
@@ -21,7 +21,20 @@ import {
   Text as PaperText,
   TextInput as PaperTextInput,
   Button as PaperButton,
+  MD3DarkTheme as PaperDarkTheme,
+  Surface
 } from 'react-native-paper';
+
+const CombinedDarkTheme = {
+  ...NavDarkTheme,
+  ...PaperDarkTheme,
+  colors: {
+    ...NavDarkTheme.colors,
+    ...PaperDarkTheme.colors,
+    background: '#000000',
+    text: '#ffffff',
+  },
+};
 
 // 스택 네비게이션 생성
 const Stack = createNativeStackNavigator();
@@ -32,7 +45,7 @@ const Stack = createNativeStackNavigator();
  */
 function HomeScreen({ navigation }) {
   return (
-    <View style={styles.homeContainer}>
+    <Surface style={styles.homeContainer}>
       <PaperText variant="titleLarge" style={{ marginBottom: 20 }}>
         메인 화면
       </PaperText>
@@ -43,7 +56,7 @@ function HomeScreen({ navigation }) {
       >
         리뷰 로딩
       </PaperButton>
-    </View>
+    </Surface>
   );
 }
 
@@ -354,8 +367,8 @@ function ReviewScreen({ route }) {
  */
 export default function App() {
   return (
-    <PaperProvider>
-      <NavigationContainer>
+    <PaperProvider theme={CombinedDarkTheme}>
+      <NavigationContainer theme={CombinedDarkTheme}>
         <Stack.Navigator>
           <Stack.Screen
             name="Home"
