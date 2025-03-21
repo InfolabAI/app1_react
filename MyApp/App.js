@@ -1,18 +1,22 @@
+// 명령: AISummaryScreen 에서 요약 길이가 폰을 넘어가는데 드래그가 안되니 되게 해줘. 그리고 이 내용을 복사할 수 있게 해줘. pdf 로 다운 받을 수 있는 기능도 추가해줘.
+
 // App.js
 
-import React, { useState, useEffect, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import {
   View,
+  ScrollView,
+  Share,
   FlatList,
   TouchableOpacity,
   Alert,
   StyleSheet,
-  ActivityIndicator,
+  Clipboard,
   Linking,            // 스토어 앱 열기 위해 추가
 } from 'react-native';
 
 // React Navigation
-import { NavigationContainer, DarkTheme as NavDarkTheme } from '@react-navigation/native';
+import { NavigationContainer, DarkTheme as NavDarkTheme, useNavigation } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 // React Native Paper
@@ -22,8 +26,21 @@ import {
   TextInput as PaperTextInput,
   Button as PaperButton,
   MD3DarkTheme as PaperDarkTheme,
+  ActivityIndicator,
+  Menu,
+  Divider,
+  IconButton,
   Surface
 } from 'react-native-paper';
+
+import Markdown from 'react-native-markdown-display';
+
+import RNHTMLtoPDF from 'react-native-html-to-pdf';
+import { useFocusEffect } from '@react-navigation/native';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+
+
 
 const CombinedDarkTheme = {
   ...NavDarkTheme,
@@ -281,15 +298,14 @@ function HelpScreen({ navigation }) {
  */
 function ReviewScreen({ route }) {
   const { appId, appName } = route.params;
-
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const navigation = useNavigation();
 
   useEffect(() => {
     // AWS API Gateway + Lambda 엔드포인트 (POST로 호출)
     const LAMBDA_URL = 'https://2frhmnck64.execute-api.ap-northeast-2.amazonaws.com/crawlF';
-
     fetch(LAMBDA_URL, {
       method: 'POST',
       headers: {
@@ -298,7 +314,7 @@ function ReviewScreen({ route }) {
       body: JSON.stringify({
         app_id: appId,
         is_summary: 'false'
-      }),  // 예: { "app_id": "com.nianticlabs.pokemongo" }
+      }),
     })
       .then((response) => {
         if (!response.ok) {
@@ -322,6 +338,13 @@ function ReviewScreen({ route }) {
         setLoading(false);
       });
   }, [appId]);
+
+  const navigateToAISummary = () => {
+    navigation.navigate('AISummary', {
+      appId,
+      appName
+    });
+  };
 
   if (loading) {
     return (
@@ -352,9 +375,18 @@ function ReviewScreen({ route }) {
 
   return (
     <View style={styles.container}>
-      <PaperText variant="titleLarge" style={{ textAlign: 'center', margin: 20 }}>
-        {appName} ({appId}) 리뷰
-      </PaperText>
+      <View style={styles.headerContainer}>
+        <PaperText variant="titleLarge" style={{ textAlign: 'center', flex: 1 }}>
+          {appName} ({appId}) 리뷰
+        </PaperText>
+        <PaperButton
+          mode="contained"
+          onPress={navigateToAISummary}
+          style={styles.summaryButton}
+        >
+          AI 요약
+        </PaperButton>
+      </View>
       <FlatList
         data={reviews}
         keyExtractor={(_, index) => index.toString()}
@@ -363,6 +395,290 @@ function ReviewScreen({ route }) {
     </View>
   );
 }
+
+
+function AISummaryScreen({ route, navigation }) {
+  const { appId, appName } = route.params;
+  const [summary, setSummary] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [downloadingPDF, setDownloadingPDF] = useState(false);
+  const scrollViewRef = useRef(null);
+
+  // Add this to your component imports
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <Menu
+          visible={menuVisible}
+          onDismiss={() => setMenuVisible(false)}
+          anchor={
+            <IconButton
+              icon="dots-vertical"
+              onPress={() => setMenuVisible(true)}
+            />
+          }
+        >
+          <Menu.Item
+            onPress={copyToClipboard}
+            title="복사하기"
+            leadingIcon="content-copy"
+          />
+          <Menu.Item
+            onPress={downloadAsPDF}
+            title="PDF로 저장"
+            leadingIcon="file-pdf-box"
+          />
+          <Menu.Item
+            onPress={shareContent}
+            title="공유하기"
+            leadingIcon="share-variant"
+          />
+        </Menu>
+      ),
+    });
+  }, [navigation, menuVisible, summary]);
+
+  useEffect(() => {
+    // AWS API Gateway + Lambda 엔드포인트 (POST로 호출)
+    const LAMBDA_URL = 'https://2frhmnck64.execute-api.ap-northeast-2.amazonaws.com/crawlF';
+    fetch(LAMBDA_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        app_id: appId,
+        is_summary: 'true'
+      }),
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP error: ${response.status}`);
+        }
+        return response.text();
+      })
+      .then((data) => {
+        console.log('응답 데이터:', data); // 디버깅용 로그 추가
+        console.log('데이터 타입:', typeof data);
+        console.log('데이터 길이:', data.length);
+
+        if (data && data.length > 0) {
+          setSummary(data);
+        } else {
+          console.error('빈 응답 데이터 받음');
+          setError(true);
+        }
+      })
+      .catch((err) => {
+        console.error(err);
+        setError(true);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [appId]);
+
+  // 클립보드에 복사하는 함수
+  const copyToClipboard = () => {
+    Clipboard.setString(summary);
+    Alert.alert("복사 완료", "요약 내용이 클립보드에 복사되었습니다.");
+    setMenuVisible(false);
+  };
+
+  // PDF로 저장하는 함수
+  const downloadAsPDF = async () => {
+    try {
+      setDownloadingPDF(true);
+      setMenuVisible(false);
+
+      // HTML 템플릿 생성
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <title>${appName} 리뷰 요약</title>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 20px; }
+              h1 { color: #333; text-align: center; }
+              .content { line-height: 1.6; }
+            </style>
+          </head>
+          <body>
+            <h1>${appName} 리뷰 AI 요약</h1>
+            <div class="content">
+              ${summary.replace(/\n/g, '<br/>')}
+            </div>
+          </body>
+        </html>
+      `;
+
+      const options = {
+        html: htmlContent,
+        fileName: `${appName.replace(/\s+/g, '_')}_리뷰_요약`,
+        directory: 'Documents',
+      };
+
+      const file = await RNHTMLtoPDF.convert(options);
+
+      // PDF 생성 성공
+      if (file.filePath) {
+        Alert.alert(
+          "PDF 생성 완료",
+          `${file.filePath}에 저장되었습니다.`,
+          [
+            {
+              text: "확인",
+              style: "cancel"
+            },
+            {
+              text: "공유하기",
+              onPress: () => shareFile(file.filePath)
+            }
+          ]
+        );
+      }
+    } catch (error) {
+      console.error('PDF 생성 오류:', error);
+      Alert.alert("오류", "PDF 생성 중 오류가 발생했습니다.");
+    } finally {
+      setDownloadingPDF(false);
+    }
+  };
+
+  // 파일 공유 함수
+  const shareFile = async (filePath) => {
+    try {
+      await Sharing.shareAsync(filePath);
+    } catch (error) {
+      console.error('파일 공유 오류:', error);
+      Alert.alert("오류", "파일 공유 중 오류가 발생했습니다.");
+    }
+  };
+
+  // 텍스트 공유 함수
+  const shareContent = async () => {
+    try {
+      setMenuVisible(false);
+      await Share.share({
+        message: `${appName} 리뷰 AI 요약:\n\n${summary}`,
+        title: `${appName} 리뷰 요약`
+      });
+    } catch (error) {
+      console.error('공유 오류:', error);
+      Alert.alert("오류", "공유 중 오류가 발생했습니다.");
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <PaperText style={{ marginBottom: 8 }}>AI 요약 생성 중...</PaperText>
+        <ActivityIndicator animating />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <PaperText variant="titleLarge" style={{ textAlign: 'center', margin: 20 }}>
+          요약을 불러오는 중 오류가 발생했습니다
+        </PaperText>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <PaperText variant="titleLarge" style={{ textAlign: 'center', margin: 20 }}>
+        {appName} 리뷰 AI 요약
+      </PaperText>
+
+      {/* 액션 버튼 영역 */}
+      <View style={styles.buttonContainer}>
+        <PaperButton
+          mode="contained"
+          onPress={copyToClipboard}
+          icon="content-copy"
+          style={styles.actionButton}
+        >
+          복사하기
+        </PaperButton>
+
+        <PaperButton
+          mode="contained"
+          onPress={downloadAsPDF}
+          icon="file-pdf-box"
+          style={styles.actionButton}
+          loading={downloadingPDF}
+          disabled={downloadingPDF}
+        >
+          PDF 저장
+        </PaperButton>
+
+        <PaperButton
+          mode="contained"
+          onPress={shareContent}
+          icon="share-variant"
+          style={styles.actionButton}
+        >
+          공유하기
+        </PaperButton>
+      </View>
+
+      {/* 스크롤 가능한 영역으로 변경 */}
+      <ScrollView
+        style={styles.scrollContainer}
+        ref={scrollViewRef}
+        contentContainerStyle={styles.scrollContentContainer}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          onLongPress={copyToClipboard}
+        >
+          <View style={styles.markdownContainer}>
+            <Markdown
+              style={{
+                body: { color: '#ffffff' }, // 기본 텍스트 색상
+                heading1: { color: '#ffffff' },
+                heading2: { color: '#ffffff' },
+                heading3: { color: '#ffffff' },
+                heading4: { color: '#ffffff' },
+                heading5: { color: '#ffffff' },
+                heading6: { color: '#ffffff' },
+                strong: { color: '#ffffff' },
+                em: { color: '#ffffff' },
+                blockquote: { color: '#ffffff' },
+                bullet_list: { color: '#ffffff' },
+                ordered_list: { color: '#ffffff' },
+                list_item: { color: '#ffffff' },
+                paragraph: { color: '#ffffff', fontSize: 16, lineHeight: 24 },
+                link: { color: '#3498db' }, // 링크 색상은 구분하기 쉽게
+                code_block: { backgroundColor: '#2c3e50', color: '#ffffff' },
+                code_inline: { backgroundColor: '#2c3e50', color: '#ffffff' },
+              }}
+            >
+              {summary}
+            </Markdown>
+          </View>
+        </TouchableOpacity>
+      </ScrollView>
+
+      {downloadingPDF && (
+        <View style={styles.overlay}>
+          <ActivityIndicator size="large" color="#ffffff" />
+          <PaperText style={{ color: '#ffffff', marginTop: 10 }}>
+            PDF 생성 중...
+          </PaperText>
+        </View>
+      )}
+    </View>
+  );
+}
+
 
 /**
  * 메인 App 컴포넌트
@@ -392,6 +708,11 @@ export default function App() {
             name="Review"
             component={ReviewScreen}
             options={{ title: '앱 리뷰' }}
+          />
+          <Stack.Screen
+            name="AISummary"
+            component={AISummaryScreen}
+            options={{ title: 'AI 요약' }}
           />
         </Stack.Navigator>
       </NavigationContainer>
@@ -437,5 +758,33 @@ const styles = StyleSheet.create({
     padding: 15,
     borderBottomWidth: 1,
     borderColor: '#ccc',
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 10,
+  },
+  actionButton: {
+    margin: 5,
+  },
+  markdownContainer: {
+    flex: 1,
+    backgroundColor: '#222', // 다크테마에 맞는 배경색
+    padding: 16,
+    borderRadius: 8,
+    elevation: 2,
+  },
+  scrollContainer: {
+    flex: 1,
+  },
+  scrollContentContainer: {
+    flexGrow: 1,
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
   },
 });
