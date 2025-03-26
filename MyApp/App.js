@@ -45,7 +45,6 @@ import * as WebBrowser from 'expo-web-browser';
 import axios from 'axios'; // axios 설치 필요: npm install axios
 import cheerio from 'react-native-cheerio'; // cheerio 설치 필요: npm install react-native-cheerio
 
-
 // 파일 상단에 추가
 const DEBUG = true;  // 디버그 모드 플래그
 
@@ -541,7 +540,11 @@ function HelpScreen({ navigation }) {
   };
 
   return (
-    <View style={styles.helpContainer}>
+    <ScrollView
+      style={styles.helpContainer}
+      contentContainerStyle={styles.helpContentContainer}
+      showsVerticalScrollIndicator={false}
+    >
       {processing ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#6200ee" />
@@ -637,11 +640,9 @@ function HelpScreen({ navigation }) {
           </PaperButton>
         </>
       )}
-    </View>
+    </ScrollView>
   );
 }
-
-
 
 /**
  * 4) ReviewScreen
@@ -812,7 +813,6 @@ function ReviewScreen({ route }) {
   );
 }
 
-
 function AISummaryScreen({ route, navigation }) {
   const { appId, appName } = route.params;
   const [summary, setSummary] = useState('');
@@ -836,11 +836,6 @@ function AISummaryScreen({ route, navigation }) {
             />
           }
         >
-          <Menu.Item
-            onPress={copyToClipboard}
-            title="복사하기"
-            leadingIcon="content-copy"
-          />
           <Menu.Item
             onPress={downloadAsPDF}
             title="PDF로 저장"
@@ -903,13 +898,6 @@ function AISummaryScreen({ route, navigation }) {
     fetchSummary();
   }, [appId]);
 
-  // 클립보드에 복사하는 함수
-  const copyToClipboard = () => {
-    Clipboard.setString(summary);
-    Alert.alert("복사 완료", "요약 내용이 클립보드에 복사되었습니다.");
-    setMenuVisible(false);
-  };
-
   // PDF로 저장하는 함수
   const downloadAsPDF = async () => {
     try {
@@ -941,7 +929,7 @@ function AISummaryScreen({ route, navigation }) {
       const options = {
         html: htmlContent,
         fileName: `${appName.replace(/\s+/g, '_')}_리뷰_요약`,
-        directory: 'Documents',
+        directory: FileSystem.cacheDirectory, // 캐시 디렉토리에 임시 저장
       };
 
       const file = await RNHTMLtoPDF.convert(options);
@@ -950,14 +938,14 @@ function AISummaryScreen({ route, navigation }) {
       if (file.filePath) {
         Alert.alert(
           "PDF 생성 완료",
-          `${file.filePath}에 저장되었습니다.`,
+          "PDF가 생성되었습니다. 저장 위치를 선택해주세요.",
           [
             {
-              text: "확인",
+              text: "취소",
               style: "cancel"
             },
             {
-              text: "공유하기",
+              text: "저장/공유",
               onPress: () => shareFile(file.filePath)
             }
           ]
@@ -1020,22 +1008,14 @@ function AISummaryScreen({ route, navigation }) {
         {appName} 리뷰 AI 요약
       </PaperText>
 
-      {/* 액션 버튼 영역 */}
+      {/* 액션 버튼 영역 - 세로로 배치 */}
       <View style={styles.buttonContainer}>
-        <PaperButton
-          mode="contained"
-          onPress={copyToClipboard}
-          icon="content-copy"
-          style={styles.actionButton}
-        >
-          복사하기
-        </PaperButton>
-
         <PaperButton
           mode="contained"
           onPress={downloadAsPDF}
           icon="file-pdf-box"
           style={styles.actionButton}
+          contentStyle={styles.actionButtonContent}
           loading={downloadingPDF}
           disabled={downloadingPDF}
         >
@@ -1047,6 +1027,7 @@ function AISummaryScreen({ route, navigation }) {
           onPress={shareContent}
           icon="share-variant"
           style={styles.actionButton}
+          contentStyle={styles.actionButtonContent}
         >
           공유하기
         </PaperButton>
@@ -1060,7 +1041,7 @@ function AISummaryScreen({ route, navigation }) {
       >
         <TouchableOpacity
           activeOpacity={1}
-          onLongPress={copyToClipboard}
+          onLongPress={shareContent}
         >
           <View style={styles.markdownContainer}>
             <Markdown
@@ -1101,7 +1082,6 @@ function AISummaryScreen({ route, navigation }) {
     </View>
   );
 }
-
 
 /**
  * 메인 App 컴포넌트
@@ -1232,13 +1212,15 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   buttonContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
     marginBottom: 10,
     paddingHorizontal: 12,
   },
   actionButton: {
-    margin: 5,
+    marginVertical: 5,
+    width: '100%',
+  },
+  actionButtonContent: {
+    height: 48,
   },
   markdownContainer: {
     flex: 1,
@@ -1307,8 +1289,11 @@ const styles = StyleSheet.create({
   },
   helpContainer: {
     flex: 1,
-    padding: 16,
     backgroundColor: '#121212',
+  },
+  helpContentContainer: {
+    padding: 16,
+    paddingBottom: 32, // 하단 여백 추가
   },
   sectionTitle: {
     fontSize: 18,
@@ -1413,5 +1398,17 @@ const styles = StyleSheet.create({
   },
   retryButton: {
     marginTop: 16,
+  },
+  headerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+  },
+  summaryButton: {
+    marginLeft: 'auto',
+  },
+  screenContainer: {
+    flex: 1,
+    backgroundColor: '#121212',
   },
 });
