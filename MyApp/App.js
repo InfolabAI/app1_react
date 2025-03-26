@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 
 // React Navigation
-import { NavigationContainer, DarkTheme as NavDarkTheme, useNavigation } from '@react-navigation/native';
+import { NavigationContainer, DarkTheme as NavDarkTheme, useNavigation, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 // React Native Paper
@@ -46,7 +46,16 @@ import axios from 'axios'; // axios 설치 필요: npm install axios
 import cheerio from 'react-native-cheerio'; // cheerio 설치 필요: npm install react-native-cheerio
 
 
+// 파일 상단에 추가
+const DEBUG = true;  // 디버그 모드 플래그
 
+const log = (...args) => {
+  if (DEBUG) {
+    console.log('[DEBUG]', ...args);
+    // Alert로도 표시 (개발 중에만)
+    Alert.alert('Debug Log', JSON.stringify(args, null, 2));
+  }
+};
 
 const CombinedDarkTheme = {
   ...NavDarkTheme,
@@ -61,6 +70,9 @@ const CombinedDarkTheme = {
 
 // 스택 네비게이션 생성
 const Stack = createNativeStackNavigator();
+
+// 네비게이션 참조 생성
+const navigationRef = createNavigationContainerRef();
 
 /** 
  * 1) HomeScreen 
@@ -458,60 +470,54 @@ function HelpScreen({ navigation }) {
   // Google Play 스토어에서 앱 정보 가져오기
   const fetchAppInfo = async (appId) => {
     try {
+      // 1. 먼저 웹 스크래핑으로 앱 정보 가져오기
       const url = `https://play.google.com/store/apps/details?id=${appId}&hl=ko`;
-
-      // axios로 HTML 가져오기
       const response = await axios.get(url);
       const html = response.data;
-
-      // cheerio로 파싱
       const $ = cheerio.load(html);
 
-      // 앱 이름 추출
+      // 앱 이름과 아이콘 URL 추출 (기존 코드와 동일)
       let appName = '';
-      // 방법 1: 메타 데이터에서 찾기
       const metaTitle = $('meta[property="og:title"]').attr('content');
       if (metaTitle) {
         appName = metaTitle.split(' - ')[0].trim();
       }
 
-      // 방법 2: h1 태그에서 찾기
-      if (!appName) {
-        $('h1').each(function () {
-          const text = $(this).text().trim();
-          if (text) {
-            appName = text;
-            return false;
-          }
-        });
-      }
-
-      // 아이콘 URL 추출
       let iconUrl = '';
-      // 방법 1: 메타 이미지에서 찾기
       const metaImage = $('meta[property="og:image"]').attr('content');
       if (metaImage) {
         iconUrl = metaImage;
       }
 
-      // 방법 2: 이미지 태그에서 찾기
-      if (!iconUrl) {
-        $('img').each(function () {
-          const src = $(this).attr('src');
-          if (src && src.includes('googleusercontent') && src.includes('=w')) {
-            iconUrl = src;
-            return false;
-          }
-        });
-      }
-
-      // 백업: 정보를 찾지 못한 경우
+      // 백업 값 설정
       if (!appName) appName = `앱 (${appId})`;
       if (!iconUrl) iconUrl = 'https://via.placeholder.com/180';
 
-      console.log('추출된 정보:', { appId, appName, iconUrl });
+      // 2. Lambda 함수를 통해 DB에 앱 정보 등록
+      const LAMBDA_URL = 'https://2frhmnck64.execute-api.ap-northeast-2.amazonaws.com/crawlF';
+      const lambdaResponse = await fetch(LAMBDA_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          request_type: 'app_info_add',
+          app_id: appId,
+          app_name: appName,
+          app_logo: iconUrl
+        }),
+      });
 
-      // AppListScreen으로 정보 전달
+      if (!lambdaResponse.ok) {
+        throw new Error('앱 정보 등록에 실패했습니다.');
+      }
+
+      const result = await lambdaResponse.json();
+      if (!result.success) {
+        throw new Error(result.message || '앱 정보 등록에 실패했습니다.');
+      }
+
+      // 성공 시 AppListScreen으로 이동
       navigation.navigate('AppList', {
         extractedPackageId: appId,
         extractedAppName: appName,
@@ -520,15 +526,7 @@ function HelpScreen({ navigation }) {
 
     } catch (error) {
       console.error('앱 정보 가져오기 오류:', error);
-      Alert.alert(
-        "오류",
-        "앱 정보를 가져오는 중 오류가 발생했습니다."
-      );
-
-      // 최소한 ID만이라도 전달
-      navigation.navigate('AppList', {
-        extractedPackageId: appId
-      });
+      Alert.alert("오류", error.message || "앱 정보를 가져오는 중 오류가 발생했습니다.");
     }
   };
 
@@ -658,40 +656,104 @@ function ReviewScreen({ route }) {
   const navigation = useNavigation();
 
   useEffect(() => {
-    // AWS API Gateway + Lambda 엔드포인트 (POST로 호출)
-    const LAMBDA_URL = 'https://2frhmnck64.execute-api.ap-northeast-2.amazonaws.com/crawlF';
-    fetch(LAMBDA_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        app_id: appId,
-        is_summary: 'false'
-      }),
-    })
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP error: ${response.status}`);
+    const fetchReviews = async () => {
+      try {
+        setLoading(true);
+        const LAMBDA_URL = 'https://2frhmnck64.execute-api.ap-northeast-2.amazonaws.com/crawlF';
+        const response = await fetch(LAMBDA_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            request_type: 'app_review_read',
+            app_id: appId
+          }),
+        });
+
+        console.log('response', response);
+        console.log('response status:', response.status);
+        console.log('response statusText:', response.statusText);
+        console.log('response headers:', [...response.headers.entries()]);
+        console.log('response type:', response.type);
+        console.log('response url:', response.url);
+
+        // Lambda 응답의 statusCode 확인
+        if (response.status !== 200) {
+          throw new Error(data.error || '리뷰를 가져오는데 실패했습니다.');
         }
-        return response.json(); // 이미 JSON 배열 반환
-      })
-      .then((data) => {
-        // data가 [{ at: '2025-03-12 ...', score: 1, content: '...' }, ...] 라고 가정
-        if (!Array.isArray(data) || data.length === 0) {
-          setError(true);
+
+        const data = await response.json();
+        // API Gateway를 통해 Lambda 함수를 호출할 때 응답 구조 이해하기
+        // 1. Lambda 함수는 { statusCode: xxx, body: xxx } 형태로 응답을 반환함
+        // 2. API Gateway는 이 응답을 그대로 클라이언트에 전달함
+        // 3. fetch 요청 후 response.json()을 호출하면 Lambda 응답의 body 내용이 파싱되어 data에 들어옴
+        // 4. 로그를 보면 data.statusCode가 undefined이고 data.body도 undefined임
+        // 5. 즉, data 자체가 이미 Lambda 응답의 body 내용이므로 별도로 data.body로 접근할 필요 없음
+        // 6. 따라서 data 자체를 reviewData로 사용해야 함
+
+        console.log('data.statusCode', data.statusCode);
+        console.log('data.body exists?', data.body !== undefined);
+        console.log('data.body type:', typeof data.body);
+        console.log('data.body content:', data.body);
+
+        // body가 문자열로 온 경우 처리
+        const reviewData = data;
+
+        if (reviewData && reviewData.reviews && Array.isArray(reviewData.reviews)) {
+          // 날짜 형식 변환 및 데이터 정리
+          const formattedReviews = reviewData.reviews.map(review => ({
+            date: new Date(review.date).toLocaleDateString(),
+            score: review.score,
+            content: review.content,
+            username: review.username || '익명'
+          }));
+
+          setReviews(formattedReviews);
+
+          if (reviewData.new_reviews_added) {
+            Alert.alert("알림", "새로운 리뷰가 추가되었습니다.");
+          }
         } else {
-          setReviews(data);
+          console.error('잘못된 응답 형식:', reviewData);
+          throw new Error('리뷰 데이터 형식이 올바르지 않습니다.');
         }
-      })
-      .catch((err) => {
-        console.error(err);
+      } catch (err) {
+        console.error('리뷰 가져오기 오류:', err);
         setError(true);
-      })
-      .finally(() => {
+        Alert.alert(
+          "오류",
+          err.message || "리뷰를 가져오는 중 문제가 발생했습니다."
+        );
+      } finally {
         setLoading(false);
-      });
+      }
+    };
+
+    fetchReviews();
   }, [appId]);
+
+  // 에러 화면 개선
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <PaperText variant="titleLarge" style={{ textAlign: 'center', margin: 20 }}>
+          리뷰를 불러오는데 실패했습니다
+        </PaperText>
+        <PaperButton
+          mode="contained"
+          onPress={() => {
+            setError(false);
+            setLoading(true);
+            fetchReviews();
+          }}
+          style={styles.retryButton}
+        >
+          다시 시도
+        </PaperButton>
+      </View>
+    );
+  }
 
   const navigateToAISummary = () => {
     navigation.navigate('AISummary', {
@@ -795,43 +857,50 @@ function AISummaryScreen({ route, navigation }) {
   }, [navigation, menuVisible, summary]);
 
   useEffect(() => {
-    // AWS API Gateway + Lambda 엔드포인트 (POST로 호출)
-    const LAMBDA_URL = 'https://2frhmnck64.execute-api.ap-northeast-2.amazonaws.com/crawlF';
-    fetch(LAMBDA_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        app_id: appId,
-        is_summary: 'true'
-      }),
-    })
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP error: ${response.status}`);
-        }
-        return response.text();
-      })
-      .then((data) => {
-        console.log('응답 데이터:', data); // 디버깅용 로그 추가
-        console.log('데이터 타입:', typeof data);
-        console.log('데이터 길이:', data.length);
+    const fetchSummary = async () => {
+      try {
+        setLoading(true);
+        const LAMBDA_URL = 'https://2frhmnck64.execute-api.ap-northeast-2.amazonaws.com/crawlF';
+        const response = await fetch(LAMBDA_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            request_type: 'summary',
+            app_id: appId
+          }),
+        });
 
-        if (data && data.length > 0) {
-          setSummary(data);
-        } else {
-          console.error('빈 응답 데이터 받음');
-          setError(true);
+        console.log('sum_response', response);
+
+        if (!response.ok) {
+          throw new Error('요약을 가져오는데 실패했습니다.');
         }
-      })
-      .catch((err) => {
+
+        const data = await response.json();
+        console.log('sum_data', data);
+
+        if (data.success && data.summary) {
+          setSummary(data.summary);
+
+          // 요약 기간 정보가 있다면 표시
+          if (data.date_range) {
+            Alert.alert("요약 완료", `${data.date_range} 기간의 리뷰가 요약되었습니다.`);
+          }
+        } else {
+          throw new Error(data.error || '요약 생성에 실패했습니다.');
+        }
+      } catch (err) {
         console.error(err);
         setError(true);
-      })
-      .finally(() => {
+        Alert.alert("오류", err.message);
+      } finally {
         setLoading(false);
-      });
+      }
+    };
+
+    fetchSummary();
   }, [appId]);
 
   // 클립보드에 복사하는 함수
@@ -1085,7 +1154,7 @@ export default function App() {
 
   return (
     <PaperProvider theme={CombinedDarkTheme}>
-      <NavigationContainer theme={CombinedDarkTheme} linking={linking}>
+      <NavigationContainer theme={CombinedDarkTheme} linking={linking} ref={navigationRef}>
         <Stack.Navigator initialRouteName="Home">
           <Stack.Screen
             name="Home"
@@ -1127,14 +1196,9 @@ export default function App() {
   );
 }
 
-// 간단 스타일
+// 스타일 정의 (중복 제거 및 정리)
 const styles = StyleSheet.create({
   homeContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loadingContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1142,41 +1206,43 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 12,
+    backgroundColor: '#121212',
   },
   title: {
     textAlign: 'center',
     marginBottom: 12,
+    color: '#fff',
   },
-  addContainer: {
-    marginBottom: 10,
-  },
-  input: {
-    marginBottom: 5,
-  },
-  // 앱 목록 행 배치 (가로방향)
   itemRowContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderColor: '#ccc',
+    borderColor: '#333',
     padding: 12,
+    backgroundColor: '#1E1E1E',
+    borderRadius: 8,
+    marginBottom: 8,
   },
   reviewItemContainer: {
     padding: 15,
     borderBottomWidth: 1,
-    borderColor: '#ccc',
+    borderColor: '#333',
+    backgroundColor: '#1E1E1E',
+    borderRadius: 8,
+    marginBottom: 8,
   },
   buttonContainer: {
     flexDirection: 'row',
     justifyContent: 'space-around',
     marginBottom: 10,
+    paddingHorizontal: 12,
   },
   actionButton: {
     margin: 5,
   },
   markdownContainer: {
     flex: 1,
-    backgroundColor: '#222', // 다크테마에 맞는 배경색
+    backgroundColor: '#1E1E1E',
     padding: 16,
     borderRadius: 8,
     elevation: 2,
@@ -1186,6 +1252,7 @@ const styles = StyleSheet.create({
   },
   scrollContentContainer: {
     flexGrow: 1,
+    padding: 12,
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
@@ -1199,7 +1266,7 @@ const styles = StyleSheet.create({
     height: 50,
     borderRadius: 10,
     marginRight: 12,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#2C2C2C',
   },
   appName: {
     fontSize: 16,
@@ -1243,75 +1310,6 @@ const styles = StyleSheet.create({
     padding: 16,
     backgroundColor: '#121212',
   },
-  helpTitle: {
-    marginBottom: 24,
-    textAlign: 'center',
-    color: '#fff',
-  },
-  instructionContainer: {
-    marginBottom: 24,
-  },
-  instructionStep: {
-    flexDirection: 'row',
-    marginBottom: 20,
-    alignItems: 'flex-start',
-  },
-  stepNumber: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#6200ee',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-    marginTop: 2,
-  },
-  stepNumberText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  stepContent: {
-    flex: 1,
-  },
-  stepTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 4,
-    color: '#fff',
-  },
-  stepDescription: {
-    fontSize: 14,
-    color: '#aaa',
-    lineHeight: 20,
-  },
-  playStoreButton: {
-    marginTop: 8,
-    paddingVertical: 8,
-  },
-  playStoreButtonContent: {
-    height: 48,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#aaa',
-  },
-  helpContainer: {
-    flex: 1,
-    padding: 16,
-    backgroundColor: '#121212',
-  },
-  helpTitle: {
-    marginBottom: 24,
-    textAlign: 'center',
-    color: '#fff',
-  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
@@ -1333,14 +1331,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#2C2C2C',
     marginBottom: 16,
   },
-  addButton: {
-    marginBottom: 8,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#333',
-    marginVertical: 24,
-  },
   instructionContainer: {
     marginBottom: 24,
   },
@@ -1389,6 +1379,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#121212',
   },
   loadingText: {
     marginTop: 16,

@@ -553,14 +553,10 @@ if __name__ == "__main__":
     }
 
     # 리뷰 요약 테스트
-    event4 = {
-        "body": {
-            "request_type": "summary",
-            "app_id": "com.nianticlabs.pokemongo"
-        }
-    }
+    event4 = { "body": { "request_type": "summary", "app_id": "com.nianticlabs.pokemongo" } }
 
     # 여기에서 원하는 테스트 이벤트 선택
-    test_event = event3
+    test_event = event4
     response = lambda_handler(test_event, None)
+    breakpoint()
     print(json.dumps(response, indent=2))
