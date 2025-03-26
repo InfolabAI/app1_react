@@ -21,33 +21,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.anonymous.MyApp",
-      "intentFilters": [
-        {
-          "action": "VIEW",
-          "autoVerify": true,
-          "data": [
-            {
-              "scheme": "https",
-              "host": "*.play.google.com",
-              "pathPrefix": "/store/apps/details"
-            }
-          ],
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ]
-        },
-        {
-          "action": "SEND",
-          "category": [
-            "DEFAULT"
-          ],
-          "data": {
-            "mimeType": "text/plain"
-          }
-        }
-      ]
+      "package": "com.anonymous.MyApp"
     },
     "web": {
       "favicon": "./assets/favicon.png"
