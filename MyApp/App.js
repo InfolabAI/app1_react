@@ -1,18 +1,18 @@
 // App.js
-import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, createContext, useContext } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, createContext, useContext, useMemo } from 'react';
 import {
   View,
   ScrollView,
   Share,
   FlatList,
   TouchableOpacity,
-  Alert,
   StyleSheet,
   Image,
   Clipboard,
   RefreshControl,
+  Animated,
 } from 'react-native';
-import { marked } from 'marked'; // marked 라이브러리 추가
+import { marked } from 'marked';
 
 // React Navigation
 import {
@@ -48,8 +48,8 @@ import * as Sharing from 'expo-sharing';
 // 필요한 import 추가
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
-import axios from 'axios'; // axios 설치 필요
-import cheerio from 'react-native-cheerio'; // cheerio 설치 필요
+import axios from 'axios';
+import cheerio from 'react-native-cheerio';
 
 // PDF 생성 모듈 import
 import { generateAndSharePDF } from './utils/pdfGenerator';
@@ -57,14 +57,15 @@ import { generateAndSharePDF } from './utils/pdfGenerator';
 // 앱 전체에서 사용할 컨텍스트 생성
 const AppContext = createContext(null);
 
+// 토스트 메시지 컨텍스트 생성
+const ToastContext = createContext(null);
+
 // 디버그 모드 플래그
-const DEBUG = true;
+const DEBUG = false;
 
 const log = (...args) => {
   if (DEBUG) {
     console.log('[DEBUG]', ...args);
-    // 개발 중에만 Alert로도 표시
-    // Alert.alert('Debug Log', JSON.stringify(args, null, 2));
   }
 };
 
@@ -84,6 +85,112 @@ const Stack = createNativeStackNavigator();
 
 // 네비게이션 참조 생성
 const navigationRef = createNavigationContainerRef();
+
+// 토스트 컴포넌트
+const Toast = ({ visible, message, type = 'info', onDismiss }) => {
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    // 컴포넌트 언마운트 시 타이머 정리
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (visible) {
+      // 이전 타이머가 있으면 제거
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+
+      // 페이드 인 애니메이션
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }).start();
+
+      // 자동 사라짐 타이머 설정
+      timerRef.current = setTimeout(() => {
+        Animated.timing(fadeAnim, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }).start(() => {
+          onDismiss();
+        });
+      }, 3000);
+    }
+  }, [visible, fadeAnim]); // onDismiss 제거하여 의존성 순환 방지
+
+  if (!visible) return null;
+
+  const backgroundColor =
+    type === 'error' ? '#FF5252' :
+      type === 'success' ? '#4CAF50' :
+        '#323232';
+
+  return (
+    <Animated.View style={[
+      styles.toast,
+      { backgroundColor, opacity: fadeAnim }
+    ]}>
+      <PaperText style={styles.toastText}>{message}</PaperText>
+    </Animated.View>
+  );
+};
+
+// 토스트 프로바이더 컴포넌트
+const ToastProvider = ({ children }) => {
+  const [toast, setToast] = useState({
+    visible: false,
+    message: '',
+    type: 'info',
+  });
+
+  // 토스트 메시지를 보여주는 함수를 메모이제이션
+  const showToast = useCallback((message, type = 'info') => {
+    // 이미 토스트가 표시 중이라면 먼저 숨기고 나서 새로운 토스트 표시
+    setToast(prev => {
+      if (prev.visible) {
+        // 이미 표시 중이면 즉시 새로운 메시지로 업데이트
+        return { visible: true, message, type };
+      } else {
+        // 표시되지 않았으면 바로 표시
+        return { visible: true, message, type };
+      }
+    });
+  }, []);
+
+  // 토스트 메시지를 숨기는 함수를 메모이제이션
+  const hideToast = useCallback(() => {
+    setToast(prev => ({ ...prev, visible: false }));
+  }, []);
+
+  // 컨텍스트 값을 메모이제이션하여 불필요한 리렌더링 방지
+  const toastValue = useMemo(() => ({
+    show: showToast
+  }), [showToast]);
+
+  return (
+    <ToastContext.Provider value={toastValue}>
+      {children}
+      <Toast
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        onDismiss={hideToast}
+      />
+    </ToastContext.Provider>
+  );
+};
+
+// 토스트 훅
+const useToast = () => useContext(ToastContext);
 
 /** 
  * 1) HomeScreen 
@@ -113,13 +220,13 @@ function HomeScreen({ navigation }) {
 function AppListScreen({ navigation, route }) {
   // 앱 전역 컨텍스트 사용
   const appContext = useContext(AppContext);
+  const toast = useToast();
 
   // 앱 목록을 state로 관리 (id, name, icon)
   const [appList, setAppList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
-  // 컴포넌트의 초기 상태 선언에 초기 로딩 플래그 추가
   const [initialLoadDone, setInitialLoadDone] = useState(false);
 
   // 검색어 상태
@@ -133,7 +240,6 @@ function AppListScreen({ navigation, route }) {
 
   // 앱 목록 가져오기
   const fetchAppList = async () => {
-    // 이미 새로고침 중이면 중복 호출 방지
     if (isRefreshingRef.current) {
       log('이미 새로고침 진행 중 - fetchAppList 중복 요청 무시');
       return Promise.resolve();
@@ -178,20 +284,18 @@ function AppListScreen({ navigation, route }) {
     } catch (err) {
       console.error('앱 목록 가져오기 오류:', err);
       setError(err.message);
-      Alert.alert('오류', '앱 목록을 가져오는데 실패했습니다.');
+      toast.show('앱 목록을 가져오는데 실패했습니다.', 'error');
     } finally {
       setLoading(false);
       setRefreshing(false);
       isRefreshingRef.current = false;
     }
-    // 명시적으로 Promise를 반환
     return Promise.resolve();
   };
 
   // 새로고침 처리 함수
   const handleRefresh = useCallback(async () => {
     log('handleRefresh 호출됨');
-    // 이미 새로고침 중이면 중복 실행 방지
     if (refreshing || isRefreshingRef.current) {
       log('이미 새로고침 중 - 요청 무시');
       return;
@@ -201,29 +305,38 @@ function AppListScreen({ navigation, route }) {
       setRefreshing(true);
       isRefreshingRef.current = true;
       await fetchAppList();
-      Alert.alert('알림', '앱 목록이 새로고침되었습니다.');
+      toast.show('앱 목록이 새로고침되었습니다.', 'success');
     } catch (error) {
       console.error('새로고침 오류:', error);
     } finally {
       setRefreshing(false);
       isRefreshingRef.current = false;
     }
-  }, [refreshing]); // refreshing 상태에 의존성 추가
+  }, [refreshing, toast]);
 
   // 컴포넌트가 마운트될 때 fetchAppList 호출
   useEffect(() => {
     log('AppListScreen 마운트됨 - 초기 데이터 로드');
+    let isMounted = true;
 
     const initialLoad = async () => {
       try {
         await fetchAppList();
       } finally {
-        setInitialLoadDone(true);
-        log('초기 데이터 로딩 완료');
+        if (isMounted) {
+          setInitialLoadDone(true);
+          log('초기 데이터 로딩 완료');
+        }
       }
     };
 
     initialLoad();
+
+    return () => {
+      isMounted = false;
+    };
+    // fetchAppList를 의존성에 넣으면 무한 루프가 발생할 수 있어 제외
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // route.params.refreshTrigger가 변경될 때마다 fetchAppList 호출
@@ -235,7 +348,6 @@ function AppListScreen({ navigation, route }) {
       log('새로운 refreshTrigger 감지됨:', route.params.refreshTrigger);
       lastRefreshTriggerRef.current = route.params.refreshTrigger;
 
-      // 이미 새로고침 중인지 확인
       if (!refreshing && !isRefreshingRef.current) {
         handleRefresh();
       } else {
@@ -255,7 +367,6 @@ function AppListScreen({ navigation, route }) {
     useCallback(() => {
       log('AppListScreen 포커스됨');
 
-      // 초기 로딩이 완료된 후에만 새로고침 함수 설정
       if (initialLoadDone) {
         log('새로고침 함수 설정 완료');
         appContext.setRefreshFunction(() => stableRefreshFunction);
@@ -267,7 +378,7 @@ function AppListScreen({ navigation, route }) {
         log('AppListScreen 포커스 해제');
         appContext.setRefreshFunction(null);
       };
-    }, [initialLoadDone, stableRefreshFunction])
+    }, [initialLoadDone, stableRefreshFunction, appContext])
   );
 
   // 검색어가 변경될 때마다 목록 필터링
@@ -291,9 +402,9 @@ function AppListScreen({ navigation, route }) {
       const appName = route.params?.extractedAppName || `앱 (${appId})`;
       const appIcon = route.params?.extractedAppIcon || 'https://via.placeholder.com/180';
 
-      // 이미 존재하는 앱인지 확인
+      // 이미 존재하는 앱인지 확인 (의존성 순환 방지를 위해 함수 내부에서 appList 확인)
       if (appList.some((app) => app.id === appId)) {
-        Alert.alert('알림', '이미 존재하는 앱입니다.');
+        toast.show('이미 존재하는 앱입니다.', 'info');
         return;
       }
 
@@ -304,10 +415,13 @@ function AppListScreen({ navigation, route }) {
         icon: appIcon,
       }]);
 
-      // 성공 메시지
-      Alert.alert('성공', `"${appName}" 앱이 추가되었습니다.`);
+      // 성공 메시지 (다음 렌더링 사이클까지 지연)
+      setTimeout(() => {
+        toast.show(`"${appName}" 앱이 추가되었습니다.`, 'success');
+      }, 0);
     }
-  }, [route.params]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.params?.extractedPackageId, route.params?.extractedAppName, route.params?.extractedAppIcon]);
 
   // 검색어 지우기
   const handleClearSearch = () => {
@@ -317,20 +431,17 @@ function AppListScreen({ navigation, route }) {
   const renderItem = ({ item }) => {
     return (
       <View style={styles.itemRowContainer}>
-        {/* 앱 아이콘 */}
         <Image
           source={{ uri: item.icon }}
           style={styles.appIcon}
           defaultSource={require('./assets/app-placeholder.png')}
         />
 
-        {/* 앱 이름 (왼쪽) */}
         <View style={{ flex: 1 }}>
           <PaperText style={styles.appName}>{item.name}</PaperText>
           <PaperText style={styles.appId}>{item.id}</PaperText>
         </View>
 
-        {/* 리뷰 보기 (중간) */}
         <PaperButton
           mode="contained"
           onPress={() => {
@@ -483,6 +594,7 @@ function AppListScreen({ navigation, route }) {
  * 구글 플레이스토어 앱 공유 안내 및 처리
  */
 function HelpScreen({ navigation }) {
+  const toast = useToast();
   const [playStoreLink, setPlayStoreLink] = useState('');
   const [processing, setProcessing] = useState(false);
 
@@ -517,15 +629,13 @@ function HelpScreen({ navigation }) {
       const match = url.match(/id=([^&]+)/);
       if (match && match[1]) {
         const extractedId = match[1];
-
-        // 웹 스크래핑으로 앱 정보 가져오기
         await fetchAppInfo(extractedId);
       } else {
-        Alert.alert("오류", "유효한 구글 플레이스토어 링크가 아닙니다.");
+        toast.show("유효한 구글 플레이스토어 링크가 아닙니다.", "error");
       }
     } catch (error) {
       console.error('링크 처리 오류:', error);
-      Alert.alert("오류", "링크를 처리하는 중 문제가 발생했습니다.");
+      toast.show("링크를 처리하는 중 문제가 발생했습니다.", "error");
     } finally {
       setProcessing(false);
     }
@@ -534,7 +644,7 @@ function HelpScreen({ navigation }) {
   // 직접 입력한 링크 처리하기
   const handleManualLink = async () => {
     if (!playStoreLink) {
-      Alert.alert("오류", "링크를 입력해주세요.");
+      toast.show("링크를 입력해주세요.", "error");
       return;
     }
 
@@ -557,15 +667,13 @@ function HelpScreen({ navigation }) {
 
       if (match && match[1]) {
         const extractedId = match[1];
-
-        // 웹 스크래핑으로 앱 정보 가져오기
         await fetchAppInfo(extractedId);
       } else {
-        Alert.alert("오류", "유효한 구글 플레이스토어 링크나 패키지명이 아닙니다.");
+        toast.show("유효한 구글 플레이스토어 링크나 패키지명이 아닙니다.", "error");
       }
     } catch (error) {
       console.error('링크 처리 오류:', error);
-      Alert.alert("오류", "링크를 처리하는 중 문제가 발생했습니다.");
+      toast.show("링크를 처리하는 중 문제가 발생했습니다.", "error");
     } finally {
       setProcessing(false);
     }
@@ -580,7 +688,7 @@ function HelpScreen({ navigation }) {
       const html = response.data;
       const $ = cheerio.load(html);
 
-      // 앱 이름과 아이콘 URL 추출 (기존 코드와 동일)
+      // 앱 이름과 아이콘 URL 추출
       let appName = '';
       const metaTitle = $('meta[property="og:title"]').attr('content');
       if (metaTitle) {
@@ -630,7 +738,7 @@ function HelpScreen({ navigation }) {
 
     } catch (error) {
       console.error('앱 정보 가져오기 오류:', error);
-      Alert.alert("오류", error.message || "앱 정보를 가져오는 중 오류가 발생했습니다.");
+      toast.show(error.message || "앱 정보를 가져오는 중 오류가 발생했습니다.", "error");
     }
   };
 
@@ -657,7 +765,7 @@ function HelpScreen({ navigation }) {
         </View>
       ) : (
         <>
-          {/* 링크 직접 입력 섹션 추가 */}
+          {/* 링크 직접 입력 섹션 */}
           <View style={styles.linkInputContainer}>
             <PaperText style={styles.sectionTitle}>앱 링크 직접 입력</PaperText>
             <PaperText style={styles.instructionText}>
@@ -754,6 +862,7 @@ function HelpScreen({ navigation }) {
  * 선택된 앱에 대한 리뷰를 서버에서 fetch 해와서 표시
  */
 function ReviewScreen({ route }) {
+  const toast = useToast();
   const { appId, appName } = route.params;
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -775,18 +884,11 @@ function ReviewScreen({ route }) {
         }),
       });
 
-      console.log('response', response);
-      console.log('response status:', response.status);
-
-      // Lambda 응답의 statusCode 확인
       if (response.status !== 200) {
         throw new Error('리뷰를 가져오는데 실패했습니다.');
       }
 
       const data = await response.json();
-      console.log('data received:', data);
-
-      // body가 문자열로 온 경우 처리
       const reviewData = data;
 
       if (reviewData && reviewData.reviews && Array.isArray(reviewData.reviews)) {
@@ -801,7 +903,7 @@ function ReviewScreen({ route }) {
         setReviews(formattedReviews);
 
         if (reviewData.new_reviews_added) {
-          Alert.alert("알림", "새로운 리뷰가 추가되었습니다.");
+          toast.show("새로운 리뷰가 추가되었습니다.", "info");
         }
       } else {
         console.error('잘못된 응답 형식:', reviewData);
@@ -810,10 +912,7 @@ function ReviewScreen({ route }) {
     } catch (err) {
       console.error('리뷰 가져오기 오류:', err);
       setError(true);
-      Alert.alert(
-        "오류",
-        err.message || "리뷰를 가져오는 중 문제가 발생했습니다."
-      );
+      toast.show(err.message || "리뷰를 가져오는 중 문제가 발생했습니다.", "error");
     } finally {
       setLoading(false);
     }
@@ -892,6 +991,7 @@ function ReviewScreen({ route }) {
 }
 
 function AISummaryScreen({ route, navigation }) {
+  const toast = useToast();
   const { appId, appName } = route.params;
   const [summary, setSummary] = useState('');
   const [loading, setLoading] = useState(true);
@@ -929,6 +1029,8 @@ function AISummaryScreen({ route, navigation }) {
   }, [navigation, menuVisible, summary]);
 
   useEffect(() => {
+    let isMounted = true; // 컴포넌트 마운트 상태 추적
+
     const fetchSummary = async () => {
       try {
         setLoading(true);
@@ -944,35 +1046,56 @@ function AISummaryScreen({ route, navigation }) {
           }),
         });
 
-        console.log('sum_response', response);
+        if (!isMounted) return; // 비동기 작업 중 컴포넌트가 언마운트된 경우
 
         if (!response.ok) {
           throw new Error('요약을 가져오는데 실패했습니다.');
         }
 
         const data = await response.json();
-        console.log('sum_data', data);
+
+        if (!isMounted) return;
 
         if (data.success && data.summary) {
           setSummary(data.summary);
 
-          // 요약 기간 정보가 있다면 표시
+          // 요약 기간 정보가 있다면 표시 (setTimeout으로 렌더링 사이클 분리)
           if (data.date_range) {
-            Alert.alert("요약 완료", `${data.date_range} 기간의 리뷰가 요약되었습니다.`);
+            setTimeout(() => {
+              if (isMounted) {
+                toast.show(`${data.date_range} 기간의 리뷰가 요약되었습니다.`, "success");
+              }
+            }, 100);
           }
         } else {
           throw new Error(data.error || '요약 생성에 실패했습니다.');
         }
       } catch (err) {
         console.error(err);
-        setError(true);
-        Alert.alert("오류", err.message);
+        if (isMounted) {
+          setError(true);
+          // 에러 메시지 표시 지연
+          setTimeout(() => {
+            if (isMounted) {
+              toast.show(err.message, "error");
+            }
+          }, 100);
+        }
       } finally {
-        setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     };
 
     fetchSummary();
+
+    // 클린업 함수
+    return () => {
+      isMounted = false;
+    };
+    // toast 의존성 제거하여 순환 참조 방지
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appId]);
 
   // PDF로 저장하는 함수
@@ -998,7 +1121,7 @@ function AISummaryScreen({ route, navigation }) {
       });
     } catch (error) {
       console.error('공유 오류:', error);
-      Alert.alert("오류", "공유 중 오류가 발생했습니다.");
+      toast.show("공유 중 오류가 발생했습니다.", "error");
     }
   };
 
@@ -1027,7 +1150,6 @@ function AISummaryScreen({ route, navigation }) {
         {appName} 리뷰 AI 요약
       </PaperText>
 
-      {/* 액션 버튼 영역 - 세로로 배치 */}
       <View style={styles.buttonContainer}>
         <PaperButton
           mode="contained"
@@ -1052,7 +1174,6 @@ function AISummaryScreen({ route, navigation }) {
         </PaperButton>
       </View>
 
-      {/* 스크롤 가능한 영역으로 변경 */}
       <ScrollView
         style={styles.scrollContainer}
         ref={scrollViewRef}
@@ -1065,7 +1186,7 @@ function AISummaryScreen({ route, navigation }) {
           <View style={styles.markdownContainer}>
             <Markdown
               style={{
-                body: { color: '#ffffff' }, // 기본 텍스트 색상
+                body: { color: '#ffffff' },
                 heading1: { color: '#ffffff' },
                 heading2: { color: '#ffffff' },
                 heading3: { color: '#ffffff' },
@@ -1079,7 +1200,7 @@ function AISummaryScreen({ route, navigation }) {
                 ordered_list: { color: '#ffffff' },
                 list_item: { color: '#ffffff' },
                 paragraph: { color: '#ffffff', fontSize: 16, lineHeight: 24 },
-                link: { color: '#3498db' }, // 링크 색상은 구분하기 쉽게
+                link: { color: '#3498db' },
                 code_block: { backgroundColor: '#2c3e50', color: '#ffffff' },
                 code_inline: { backgroundColor: '#2c3e50', color: '#ffffff' },
               }}
@@ -1104,15 +1225,12 @@ function AISummaryScreen({ route, navigation }) {
 
 /**
  * 메인 App 컴포넌트
- * 딥링크 처리 기능 통합
  */
 export default function App() {
-  // 앱 시작 시 딥링크 확인
   const [initialUrl, setInitialUrl] = useState(null);
-  // 새로고침 함수 상태 관리
   const [refreshFunction, setRefreshFunction] = useState(null);
-  // 새로고침 상태 관리
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const lastRefreshTimeRef = useRef(0);
 
   // 앱이 백그라운드에서 실행될 때 딥링크 처리
   useEffect(() => {
@@ -1137,9 +1255,6 @@ export default function App() {
       subscription.remove();
     };
   }, []);
-
-  // 마지막 새로고침 시간을 추적하기 위한 ref 추가
-  const lastRefreshTimeRef = useRef(0);
 
   const triggerRefresh = useCallback(() => {
     log('triggerRefresh 호출됨');
@@ -1201,7 +1316,6 @@ export default function App() {
       },
     },
     async getInitialURL() {
-      // 커스텀 초기 URL 처리 로직
       return initialUrl;
     },
   };
@@ -1215,45 +1329,47 @@ export default function App() {
   };
 
   return (
-    <AppContext.Provider value={appContextValue}>
-      <PaperProvider theme={CombinedDarkTheme}>
-        <NavigationContainer theme={CombinedDarkTheme} linking={linking} ref={navigationRef}>
-          <Stack.Navigator initialRouteName="Home">
-            <Stack.Screen
-              name="Home"
-              component={HomeScreen}
-              options={{ title: '메인화면' }}
-            />
-            <Stack.Screen
-              name="AppList"
-              component={AppListScreen}
-              options={{
-                title: '앱 목록'
-              }}
-            />
-            <Stack.Screen
-              name="Help"
-              component={HelpScreen}
-              options={{ title: '구글 플레이 스토어에서 앱 추가하기' }}
-            />
-            <Stack.Screen
-              name="Review"
-              component={ReviewScreen}
-              options={{ title: '앱 리뷰' }}
-            />
-            <Stack.Screen
-              name="AISummary"
-              component={AISummaryScreen}
-              options={{ title: 'AI 요약' }}
-            />
-          </Stack.Navigator>
-        </NavigationContainer>
-      </PaperProvider>
-    </AppContext.Provider>
+    <ToastProvider>
+      <AppContext.Provider value={appContextValue}>
+        <PaperProvider theme={CombinedDarkTheme}>
+          <NavigationContainer theme={CombinedDarkTheme} linking={linking} ref={navigationRef}>
+            <Stack.Navigator initialRouteName="Home">
+              <Stack.Screen
+                name="Home"
+                component={HomeScreen}
+                options={{ title: '메인화면' }}
+              />
+              <Stack.Screen
+                name="AppList"
+                component={AppListScreen}
+                options={{
+                  title: '앱 목록'
+                }}
+              />
+              <Stack.Screen
+                name="Help"
+                component={HelpScreen}
+                options={{ title: '구글 플레이 스토어에서 앱 추가하기' }}
+              />
+              <Stack.Screen
+                name="Review"
+                component={ReviewScreen}
+                options={{ title: '앱 리뷰' }}
+              />
+              <Stack.Screen
+                name="AISummary"
+                component={AISummaryScreen}
+                options={{ title: 'AI 요약' }}
+              />
+            </Stack.Navigator>
+          </NavigationContainer>
+        </PaperProvider>
+      </AppContext.Provider>
+    </ToastProvider>
   );
 }
 
-// 스타일 정의 (중복 제거 및 정리)
+// 스타일 정의
 const styles = StyleSheet.create({
   homeContainer: {
     flex: 1,
@@ -1378,7 +1494,7 @@ const styles = StyleSheet.create({
   },
   helpContentContainer: {
     padding: 16,
-    paddingBottom: 32, // 하단 여백 추가
+    paddingBottom: 32,
   },
   sectionTitle: {
     fontSize: 18,
@@ -1492,15 +1608,23 @@ const styles = StyleSheet.create({
   summaryButton: {
     marginLeft: 'auto',
   },
-  screenContainer: {
-    flex: 1,
-    backgroundColor: '#121212',
+  toast: {
+    position: 'absolute',
+    bottom: 50,
+    left: 20,
+    right: 20,
+    backgroundColor: '#323232',
+    padding: 16,
+    borderRadius: 8,
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.27,
+    shadowRadius: 4.65,
+    zIndex: 9999,
   },
-  refreshButtonContainer: {
-    paddingHorizontal: 12,
-    paddingTop: 12,
-    paddingBottom: 8,
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
+  toastText: {
+    color: '#fff',
+    textAlign: 'center',
   },
 });
