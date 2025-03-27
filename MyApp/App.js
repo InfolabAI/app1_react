@@ -1,5 +1,5 @@
 // App.js
-import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, createContext, useContext } from 'react';
 import {
   View,
   ScrollView,
@@ -15,8 +15,15 @@ import {
 import { marked } from 'marked'; // marked 라이브러리 추가
 
 // React Navigation
-import { NavigationContainer, DarkTheme as NavDarkTheme, useNavigation, createNavigationContainerRef, StackActions } from '@react-navigation/native';
+import {
+  NavigationContainer,
+  DarkTheme as NavDarkTheme,
+  useNavigation,
+  createNavigationContainerRef,
+  CommonActions
+} from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 
 // React Native Paper
 import {
@@ -35,27 +42,29 @@ import {
 import Markdown from 'react-native-markdown-display';
 
 import RNHTMLtoPDF from 'react-native-html-to-pdf';
-import { useFocusEffect } from '@react-navigation/native';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 
-// 1. 필요한 import 추가
+// 필요한 import 추가
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
-import axios from 'axios'; // axios 설치 필요: npm install axios
-import cheerio from 'react-native-cheerio'; // cheerio 설치 필요: npm install react-native-cheerio
+import axios from 'axios'; // axios 설치 필요
+import cheerio from 'react-native-cheerio'; // cheerio 설치 필요
 
 // PDF 생성 모듈 import
 import { generateAndSharePDF } from './utils/pdfGenerator';
 
-// 파일 상단에 추가
-const DEBUG = true;  // 디버그 모드 플래그
+// 앱 전체에서 사용할 컨텍스트 생성
+const AppContext = createContext(null);
+
+// 디버그 모드 플래그
+const DEBUG = true;
 
 const log = (...args) => {
   if (DEBUG) {
     console.log('[DEBUG]', ...args);
-    // Alert로도 표시 (개발 중에만)
-    Alert.alert('Debug Log', JSON.stringify(args, null, 2));
+    // 개발 중에만 Alert로도 표시
+    // Alert.alert('Debug Log', JSON.stringify(args, null, 2));
   }
 };
 
@@ -102,11 +111,16 @@ function HomeScreen({ navigation }) {
  * 앱 목록 + 플레이스토어에서 가져오기 버튼 + 검색 기능
  */
 function AppListScreen({ navigation, route }) {
+  // 앱 전역 컨텍스트 사용
+  const appContext = useContext(AppContext);
+
   // 앱 목록을 state로 관리 (id, name, icon)
   const [appList, setAppList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  // 컴포넌트의 초기 상태 선언에 초기 로딩 플래그 추가
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
 
   // 검색어 상태
   const [searchQuery, setSearchQuery] = useState('');
@@ -114,10 +128,23 @@ function AppListScreen({ navigation, route }) {
   // 필터링된 앱 목록
   const [filteredAppList, setFilteredAppList] = useState([]);
 
+  // 새로고침 요청 진행 중 플래그 추가
+  const isRefreshingRef = useRef(false);
+
   // 앱 목록 가져오기
   const fetchAppList = async () => {
+    // 이미 새로고침 중이면 중복 호출 방지
+    if (isRefreshingRef.current) {
+      log('이미 새로고침 진행 중 - fetchAppList 중복 요청 무시');
+      return Promise.resolve();
+    }
+
     try {
+      log('앱 목록 가져오기 시작');
       setLoading(true);
+      setRefreshing(true);
+      isRefreshingRef.current = true;
+
       const response = await fetch('https://2frhmnck64.execute-api.ap-northeast-2.amazonaws.com/crawlF', {
         method: 'POST',
         headers: {
@@ -133,6 +160,8 @@ function AppListScreen({ navigation, route }) {
       }
 
       const data = await response.json();
+      log('API 응답 데이터:', data);
+
       const apps = data.apps || [];
 
       // 앱 정보를 필요한 형식으로 변환
@@ -144,6 +173,8 @@ function AppListScreen({ navigation, route }) {
 
       setAppList(formattedApps);
       setFilteredAppList(formattedApps);
+      log('앱 목록 업데이트 완료:', formattedApps.length);
+
     } catch (err) {
       console.error('앱 목록 가져오기 오류:', err);
       setError(err.message);
@@ -151,36 +182,93 @@ function AppListScreen({ navigation, route }) {
     } finally {
       setLoading(false);
       setRefreshing(false);
+      isRefreshingRef.current = false;
     }
+    // 명시적으로 Promise를 반환
+    return Promise.resolve();
   };
 
   // 새로고침 처리 함수
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await fetchAppList();
-    Alert.alert('알림', '앱 목록이 새로고침되었습니다.');
-  };
+  const handleRefresh = useCallback(async () => {
+    log('handleRefresh 호출됨');
+    // 이미 새로고침 중이면 중복 실행 방지
+    if (refreshing || isRefreshingRef.current) {
+      log('이미 새로고침 중 - 요청 무시');
+      return;
+    }
 
+    try {
+      setRefreshing(true);
+      isRefreshingRef.current = true;
+      await fetchAppList();
+      Alert.alert('알림', '앱 목록이 새로고침되었습니다.');
+    } catch (error) {
+      console.error('새로고침 오류:', error);
+    } finally {
+      setRefreshing(false);
+      isRefreshingRef.current = false;
+    }
+  }, [refreshing]); // refreshing 상태에 의존성 추가
 
-  // 컴포넌트 마운트 시 앱 목록 가져오기
-  // Use useCallback to create a stable function reference
-  const refreshData = useCallback(() => {
-    setRefreshing(true);
-    fetchAppList();
-    Alert.alert('알림', '앱 목록이 새로고침되었습니다.');
+  // 컴포넌트가 마운트될 때 fetchAppList 호출
+  useEffect(() => {
+    log('AppListScreen 마운트됨 - 초기 데이터 로드');
+
+    const initialLoad = async () => {
+      try {
+        await fetchAppList();
+      } finally {
+        setInitialLoadDone(true);
+        log('초기 데이터 로딩 완료');
+      }
+    };
+
+    initialLoad();
   }, []);
 
-  // Set the refresh handler once when component mounts
-  useEffect(() => {
-    navigation.setParams({
-      handleRefresh: refreshData
-    });
-  }, [navigation, refreshData]);
+  // route.params.refreshTrigger가 변경될 때마다 fetchAppList 호출
+  const lastRefreshTriggerRef = useRef(null);
 
-  // Then use it for regular data loading on mount in a separate effect
   useEffect(() => {
-    fetchAppList();
-  }, []);
+    if (route.params?.refreshTrigger &&
+      route.params.refreshTrigger !== lastRefreshTriggerRef.current) {
+      log('새로운 refreshTrigger 감지됨:', route.params.refreshTrigger);
+      lastRefreshTriggerRef.current = route.params.refreshTrigger;
+
+      // 이미 새로고침 중인지 확인
+      if (!refreshing && !isRefreshingRef.current) {
+        handleRefresh();
+      } else {
+        log('이미 새로고침 중 - refreshTrigger에 의한 요청 무시');
+      }
+    }
+  }, [route.params?.refreshTrigger, handleRefresh, refreshing]);
+
+  // 명확한 참조를 위해 안정적인 refreshFunction 생성
+  const stableRefreshFunction = useCallback(() => {
+    log('안정적인 새로고침 함수 호출됨');
+    handleRefresh();
+  }, [handleRefresh]);
+
+  // useFocusEffect 개선
+  useFocusEffect(
+    useCallback(() => {
+      log('AppListScreen 포커스됨');
+
+      // 초기 로딩이 완료된 후에만 새로고침 함수 설정
+      if (initialLoadDone) {
+        log('새로고침 함수 설정 완료');
+        appContext.setRefreshFunction(() => stableRefreshFunction);
+      } else {
+        log('초기 로딩 중 - 새로고침 함수 설정 연기');
+      }
+
+      return () => {
+        log('AppListScreen 포커스 해제');
+        appContext.setRefreshFunction(null);
+      };
+    }, [initialLoadDone, stableRefreshFunction])
+  );
 
   // 검색어가 변경될 때마다 목록 필터링
   useEffect(() => {
@@ -341,14 +429,24 @@ function AppListScreen({ navigation, route }) {
 
       {/* 앱 추가 버튼 */}
       <View style={styles.addButtonContainer}>
-        <PaperButton
-          mode="contained"
-          icon="plus"
-          onPress={() => navigation.navigate('Help')}
-          style={styles.addButton}
-        >
-          구글 플레이스토어에서 가져오기
-        </PaperButton>
+        <View style={styles.addButtonRow}>
+          <PaperButton
+            mode="contained"
+            icon="plus"
+            onPress={() => navigation.navigate('Help')}
+            style={[styles.addButton, { flex: 1, marginRight: 8 }]}
+          >
+            구글 플레이스토어에서 가져오기
+          </PaperButton>
+          <IconButton
+            icon="refresh"
+            mode="contained"
+            onPress={handleRefresh}
+            loading={refreshing}
+            disabled={refreshing}
+            style={styles.refreshIconButton}
+          />
+        </View>
       </View>
 
       {/* 필터링 결과 표시 (검색어가 있는 경우) */}
@@ -654,7 +752,6 @@ function HelpScreen({ navigation }) {
 /**
  * 4) ReviewScreen
  * 선택된 앱에 대한 리뷰를 서버에서 fetch 해와서 표시
- * (기존 코드 예시 그대로)
  */
 function ReviewScreen({ route }) {
   const { appId, appName } = route.params;
@@ -663,105 +760,68 @@ function ReviewScreen({ route }) {
   const [error, setError] = useState(false);
   const navigation = useNavigation();
 
-  useEffect(() => {
-    const fetchReviews = async () => {
-      try {
-        setLoading(true);
-        const LAMBDA_URL = 'https://2frhmnck64.execute-api.ap-northeast-2.amazonaws.com/crawlF';
-        const response = await fetch(LAMBDA_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            request_type: 'app_review_read',
-            app_id: appId
-          }),
-        });
+  const fetchReviews = async () => {
+    try {
+      setLoading(true);
+      const LAMBDA_URL = 'https://2frhmnck64.execute-api.ap-northeast-2.amazonaws.com/crawlF';
+      const response = await fetch(LAMBDA_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          request_type: 'app_review_read',
+          app_id: appId
+        }),
+      });
 
-        console.log('response', response);
-        console.log('response status:', response.status);
-        console.log('response statusText:', response.statusText);
-        console.log('response headers:', [...response.headers.entries()]);
-        console.log('response type:', response.type);
-        console.log('response url:', response.url);
+      console.log('response', response);
+      console.log('response status:', response.status);
 
-        // Lambda 응답의 statusCode 확인
-        if (response.status !== 200) {
-          throw new Error(data.error || '리뷰를 가져오는데 실패했습니다.');
-        }
-
-        const data = await response.json();
-        // API Gateway를 통해 Lambda 함수를 호출할 때 응답 구조 이해하기
-        // 1. Lambda 함수는 { statusCode: xxx, body: xxx } 형태로 응답을 반환함
-        // 2. API Gateway는 이 응답을 그대로 클라이언트에 전달함
-        // 3. fetch 요청 후 response.json()을 호출하면 Lambda 응답의 body 내용이 파싱되어 data에 들어옴
-        // 4. 로그를 보면 data.statusCode가 undefined이고 data.body도 undefined임
-        // 5. 즉, data 자체가 이미 Lambda 응답의 body 내용이므로 별도로 data.body로 접근할 필요 없음
-        // 6. 따라서 data 자체를 reviewData로 사용해야 함
-
-        console.log('data.statusCode', data.statusCode);
-        console.log('data.body exists?', data.body !== undefined);
-        console.log('data.body type:', typeof data.body);
-        console.log('data.body content:', data.body);
-
-        // body가 문자열로 온 경우 처리
-        const reviewData = data;
-
-        if (reviewData && reviewData.reviews && Array.isArray(reviewData.reviews)) {
-          // 날짜 형식 변환 및 데이터 정리
-          const formattedReviews = reviewData.reviews.map(review => ({
-            date: new Date(review.date).toLocaleDateString(),
-            score: review.score,
-            content: review.content,
-            username: review.username || '익명'
-          }));
-
-          setReviews(formattedReviews);
-
-          if (reviewData.new_reviews_added) {
-            Alert.alert("알림", "새로운 리뷰가 추가되었습니다.");
-          }
-        } else {
-          console.error('잘못된 응답 형식:', reviewData);
-          throw new Error('리뷰 데이터 형식이 올바르지 않습니다.');
-        }
-      } catch (err) {
-        console.error('리뷰 가져오기 오류:', err);
-        setError(true);
-        Alert.alert(
-          "오류",
-          err.message || "리뷰를 가져오는 중 문제가 발생했습니다."
-        );
-      } finally {
-        setLoading(false);
+      // Lambda 응답의 statusCode 확인
+      if (response.status !== 200) {
+        throw new Error('리뷰를 가져오는데 실패했습니다.');
       }
-    };
 
+      const data = await response.json();
+      console.log('data received:', data);
+
+      // body가 문자열로 온 경우 처리
+      const reviewData = data;
+
+      if (reviewData && reviewData.reviews && Array.isArray(reviewData.reviews)) {
+        // 날짜 형식 변환 및 데이터 정리
+        const formattedReviews = reviewData.reviews.map(review => ({
+          date: new Date(review.date).toLocaleDateString(),
+          score: review.score,
+          content: review.content,
+          username: review.username || '익명'
+        }));
+
+        setReviews(formattedReviews);
+
+        if (reviewData.new_reviews_added) {
+          Alert.alert("알림", "새로운 리뷰가 추가되었습니다.");
+        }
+      } else {
+        console.error('잘못된 응답 형식:', reviewData);
+        throw new Error('리뷰 데이터 형식이 올바르지 않습니다.');
+      }
+    } catch (err) {
+      console.error('리뷰 가져오기 오류:', err);
+      setError(true);
+      Alert.alert(
+        "오류",
+        err.message || "리뷰를 가져오는 중 문제가 발생했습니다."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchReviews();
   }, [appId]);
-
-  // 에러 화면 개선
-  if (error) {
-    return (
-      <View style={styles.container}>
-        <PaperText variant="titleLarge" style={{ textAlign: 'center', margin: 20 }}>
-          리뷰를 불러오는데 실패했습니다
-        </PaperText>
-        <PaperButton
-          mode="contained"
-          onPress={() => {
-            setError(false);
-            setLoading(true);
-            fetchReviews();
-          }}
-          style={styles.retryButton}
-        >
-          다시 시도
-        </PaperButton>
-      </View>
-    );
-  }
 
   const navigateToAISummary = () => {
     navigation.navigate('AISummary', {
@@ -783,8 +843,19 @@ function ReviewScreen({ route }) {
     return (
       <View style={styles.container}>
         <PaperText variant="titleLarge" style={{ textAlign: 'center', margin: 20 }}>
-          앱을 찾을 수 없습니다
+          리뷰를 불러오는데 실패했습니다
         </PaperText>
+        <PaperButton
+          mode="contained"
+          onPress={() => {
+            setError(false);
+            setLoading(true);
+            fetchReviews();
+          }}
+          style={styles.retryButton}
+        >
+          다시 시도
+        </PaperButton>
       </View>
     );
   }
@@ -1038,6 +1109,10 @@ function AISummaryScreen({ route, navigation }) {
 export default function App() {
   // 앱 시작 시 딥링크 확인
   const [initialUrl, setInitialUrl] = useState(null);
+  // 새로고침 함수 상태 관리
+  const [refreshFunction, setRefreshFunction] = useState(null);
+  // 새로고침 상태 관리
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // 앱이 백그라운드에서 실행될 때 딥링크 처리
   useEffect(() => {
@@ -1045,7 +1120,7 @@ export default function App() {
     const getInitialURL = async () => {
       const url = await Linking.getInitialURL();
       if (url) {
-        console.log('초기 URL:', url);
+        log('초기 URL:', url);
         setInitialUrl(url);
       }
     };
@@ -1054,7 +1129,7 @@ export default function App() {
 
     // 앱 실행 중 URL 리스너
     const subscription = Linking.addEventListener('url', ({ url }) => {
-      console.log('앱 실행 중 수신된 URL:', url);
+      log('앱 실행 중 수신된 URL:', url);
       setInitialUrl(url);
     });
 
@@ -1062,6 +1137,57 @@ export default function App() {
       subscription.remove();
     };
   }, []);
+
+  // 마지막 새로고침 시간을 추적하기 위한 ref 추가
+  const lastRefreshTimeRef = useRef(0);
+
+  const triggerRefresh = useCallback(() => {
+    log('triggerRefresh 호출됨');
+
+    // 새로고침 중이면 무시
+    if (isRefreshing) {
+      log('이미 새로고침 중 - 요청 무시');
+      return;
+    }
+
+    // 빠르게 연속적인 새로고침 방지 (최소 1초 간격)
+    const now = Date.now();
+    if (now - lastRefreshTimeRef.current < 1000) {
+      log('너무 빠른 새로고침 요청 무시 (1초 이내)');
+      return;
+    }
+
+    lastRefreshTimeRef.current = now;
+
+    if (refreshFunction) {
+      log('저장된 새로고침 함수 실행');
+      setIsRefreshing(true);
+
+      // 새로고침 함수 호출 후 상태 업데이트
+      Promise.resolve(refreshFunction())
+        .finally(() => {
+          setIsRefreshing(false);
+        });
+    } else if (navigationRef.current) {
+      log('navigationRef를 통한 새로고침');
+      const currentRoute = navigationRef.current.getCurrentRoute();
+
+      if (currentRoute?.name === 'AppList') {
+        setIsRefreshing(true);
+
+        navigationRef.current.dispatch(
+          CommonActions.setParams({
+            refreshTrigger: now
+          })
+        );
+
+        // 일정 시간 후 새로고침 상태 해제 (안전장치)
+        setTimeout(() => {
+          setIsRefreshing(false);
+        }, 3000);
+      }
+    }
+  }, [refreshFunction, isRefreshing]);
 
   // 공유된 URL이 있으면 Help 화면 표시 준비
   const linking = {
@@ -1080,59 +1206,50 @@ export default function App() {
     },
   };
 
+  // 앱 전반에서 사용할 컨텍스트 값
+  const appContextValue = {
+    triggerRefresh,
+    setRefreshFunction,
+    isRefreshing,
+    setIsRefreshing
+  };
+
   return (
-    <PaperProvider theme={CombinedDarkTheme}>
-      <NavigationContainer theme={CombinedDarkTheme} linking={linking} ref={navigationRef}>
-        <Stack.Navigator initialRouteName="Home">
-          <Stack.Screen
-            name="Home"
-            component={HomeScreen}
-            options={{ title: '메인화면' }}
-          />
-          <Stack.Screen
-            name="AppList"
-            component={AppListScreen}
-            options={({ navigation, route }) => ({
-              title: '앱 목록',
-              headerRight: () => (
-                <IconButton
-                  icon="refresh"
-                  onPress={() => {
-                    if (route.params?.handleRefresh) {
-                      console.log('새로고침 함수 호출');
-                      route.params.handleRefresh();
-                    } else {
-                      console.log('백업 새로고침 호출');
-                      // 직접 AppListScreen으로 돌아간 후 새로고침
-                      const jumpToAction = StackActions.replace('AppList', {
-                        refreshTrigger: Date.now()
-                      });
-                      navigation.dispatch(jumpToAction);
-                    }
-                  }}
-                  color="#fff"
-                />
-              ),
-            })}
-          />
-          <Stack.Screen
-            name="Help"
-            component={HelpScreen}
-            options={{ title: '구글 플레이 스토어에서 앱 추가하기' }}
-          />
-          <Stack.Screen
-            name="Review"
-            component={ReviewScreen}
-            options={{ title: '앱 리뷰' }}
-          />
-          <Stack.Screen
-            name="AISummary"
-            component={AISummaryScreen}
-            options={{ title: 'AI 요약' }}
-          />
-        </Stack.Navigator>
-      </NavigationContainer>
-    </PaperProvider>
+    <AppContext.Provider value={appContextValue}>
+      <PaperProvider theme={CombinedDarkTheme}>
+        <NavigationContainer theme={CombinedDarkTheme} linking={linking} ref={navigationRef}>
+          <Stack.Navigator initialRouteName="Home">
+            <Stack.Screen
+              name="Home"
+              component={HomeScreen}
+              options={{ title: '메인화면' }}
+            />
+            <Stack.Screen
+              name="AppList"
+              component={AppListScreen}
+              options={{
+                title: '앱 목록'
+              }}
+            />
+            <Stack.Screen
+              name="Help"
+              component={HelpScreen}
+              options={{ title: '구글 플레이 스토어에서 앱 추가하기' }}
+            />
+            <Stack.Screen
+              name="Review"
+              component={ReviewScreen}
+              options={{ title: '앱 리뷰' }}
+            />
+            <Stack.Screen
+              name="AISummary"
+              component={AISummaryScreen}
+              options={{ title: 'AI 요약' }}
+            />
+          </Stack.Navigator>
+        </NavigationContainer>
+      </PaperProvider>
+    </AppContext.Provider>
   );
 }
 
@@ -1224,9 +1341,17 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     paddingHorizontal: 12,
   },
+  addButtonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   addButton: {
     width: '100%',
     paddingVertical: 8,
+  },
+  refreshIconButton: {
+    margin: 0,
+    backgroundColor: '#6200ee',
   },
   emptyContainer: {
     flex: 1,
@@ -1370,5 +1495,12 @@ const styles = StyleSheet.create({
   screenContainer: {
     flex: 1,
     backgroundColor: '#121212',
+  },
+  refreshButtonContainer: {
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 8,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
   },
 });
