@@ -735,15 +735,15 @@ function HelpScreen({ navigation }) {
           });
           return;
         }
-        throw new Error(result.message || '앱 정보 등록에 실패했습니다.');
+        // 성공 시 AppListScreen으로 이동
+        navigation.navigate('AppList', {
+          extractedPackageId: appId,
+          extractedAppName: appName,
+          extractedAppIcon: iconUrl
+        });
+        return;
       }
-
-      // 성공 시 AppListScreen으로 이동
-      navigation.navigate('AppList', {
-        extractedPackageId: appId,
-        extractedAppName: appName,
-        extractedAppIcon: iconUrl
-      });
+      throw new Error(result.message || '앱 정보 등록에 실패했습니다.');
 
     } catch (error) {
       console.error('앱 정보 가져오기 오류:', error);
