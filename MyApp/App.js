@@ -1,5 +1,5 @@
 // App.js
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import {
   View,
   ScrollView,
@@ -10,11 +10,12 @@ import {
   StyleSheet,
   Image,
   Clipboard,
+  RefreshControl,
 } from 'react-native';
 import { marked } from 'marked'; // marked 라이브러리 추가
 
 // React Navigation
-import { NavigationContainer, DarkTheme as NavDarkTheme, useNavigation, createNavigationContainerRef } from '@react-navigation/native';
+import { NavigationContainer, DarkTheme as NavDarkTheme, useNavigation, createNavigationContainerRef, StackActions } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 // React Native Paper
@@ -105,6 +106,7 @@ function AppListScreen({ navigation, route }) {
   const [appList, setAppList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   // 검색어 상태
   const [searchQuery, setSearchQuery] = useState('');
@@ -148,10 +150,34 @@ function AppListScreen({ navigation, route }) {
       Alert.alert('오류', '앱 목록을 가져오는데 실패했습니다.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
+  // 새로고침 처리 함수
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchAppList();
+    Alert.alert('알림', '앱 목록이 새로고침되었습니다.');
+  };
+
+
   // 컴포넌트 마운트 시 앱 목록 가져오기
+  // Use useCallback to create a stable function reference
+  const refreshData = useCallback(() => {
+    setRefreshing(true);
+    fetchAppList();
+    Alert.alert('알림', '앱 목록이 새로고침되었습니다.');
+  }, []);
+
+  // Set the refresh handler once when component mounts
+  useEffect(() => {
+    navigation.setParams({
+      handleRefresh: refreshData
+    });
+  }, [navigation, refreshData]);
+
+  // Then use it for regular data loading on mount in a separate effect
   useEffect(() => {
     fetchAppList();
   }, []);
@@ -195,22 +221,6 @@ function AppListScreen({ navigation, route }) {
     }
   }, [route.params]);
 
-  // 앱 삭제 함수
-  const handleRemoveApp = (targetId) => {
-    setAppList(appList.filter((app) => app.id !== targetId));
-  };
-
-  const handleRemoveAppConfirm = (targetId) => {
-    Alert.alert(
-      "삭제 확인",
-      "정말 삭제하시겠습니까?",
-      [
-        { text: "아니오", style: "cancel" },
-        { text: "예", onPress: () => handleRemoveApp(targetId) }
-      ]
-    );
-  };
-
   // 검색어 지우기
   const handleClearSearch = () => {
     setSearchQuery('');
@@ -245,14 +255,6 @@ function AppListScreen({ navigation, route }) {
           style={{ marginHorizontal: 8 }}
         >
           리뷰 보기
-        </PaperButton>
-
-        {/* 삭제 버튼 (오른쪽) */}
-        <PaperButton
-          mode="outlined"
-          onPress={() => handleRemoveAppConfirm(item.id)}
-        >
-          삭제
         </PaperButton>
       </View>
     );
@@ -290,7 +292,7 @@ function AppListScreen({ navigation, route }) {
   );
 
   // 로딩 중일 때 표시
-  if (loading) {
+  if (loading && !refreshing) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#6200ee" />
@@ -317,10 +319,6 @@ function AppListScreen({ navigation, route }) {
 
   return (
     <View style={styles.container}>
-      <PaperText variant="titleLarge" style={styles.title}>
-        앱 목록
-      </PaperText>
-
       {/* 검색 입력 필드 */}
       <View style={styles.searchContainer}>
         <PaperTextInput
@@ -370,6 +368,13 @@ function AppListScreen({ navigation, route }) {
           searchQuery.trim() !== '' ? EmptySearchResult : EmptyListComponent
         }
         contentContainerStyle={filteredAppList.length === 0 ? { flex: 1 } : null}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={['#6200ee']}
+          />
+        }
       />
     </View>
   );
@@ -1087,16 +1092,28 @@ export default function App() {
           <Stack.Screen
             name="AppList"
             component={AppListScreen}
-            options={{
+            options={({ navigation, route }) => ({
               title: '앱 목록',
               headerRight: () => (
                 <IconButton
-                  icon="help-circle-outline"
-                  onPress={() => navigationRef.current?.navigate('Help')}
+                  icon="refresh"
+                  onPress={() => {
+                    if (route.params?.handleRefresh) {
+                      console.log('새로고침 함수 호출');
+                      route.params.handleRefresh();
+                    } else {
+                      console.log('백업 새로고침 호출');
+                      // 직접 AppListScreen으로 돌아간 후 새로고침
+                      const jumpToAction = StackActions.replace('AppList', {
+                        refreshTrigger: Date.now()
+                      });
+                      navigation.dispatch(jumpToAction);
+                    }
+                  }}
                   color="#fff"
                 />
               ),
-            }}
+            })}
           />
           <Stack.Screen
             name="Help"
