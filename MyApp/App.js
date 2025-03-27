@@ -1,5 +1,3 @@
-// 명령: AISummaryScreen 에서 요약 길이가 폰을 넘어가는데 드래그가 안되니 되게 해줘. 그리고 이 내용을 복사할 수 있게 해줘. pdf 로 다운 받을 수 있는 기능도 추가해줘.
-
 // App.js
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import {
@@ -904,15 +902,20 @@ function AISummaryScreen({ route, navigation }) {
       setDownloadingPDF(true);
       setMenuVisible(false);
 
+      // RNHTMLtoPDF 모듈이 제대로 초기화되었는지 확인
+      if (!RNHTMLtoPDF) {
+        throw new Error('PDF 변환 모듈이 초기화되지 않았습니다.');
+      }
+
       // HTML 템플릿 생성
       const htmlContent = `
-        <!DOCTYPE html>
+        <!doctype html>
         <html>
           <head>
             <meta charset="utf-8">
             <title>${appName} 리뷰 요약</title>
             <style>
-              body { font-family: Arial, sans-serif; margin: 20px; }
+              body { font-family: arial, sans-serif; margin: 20px; }
               h1 { color: #333; text-align: center; }
               .content { line-height: 1.6; }
             </style>
@@ -926,16 +929,55 @@ function AISummaryScreen({ route, navigation }) {
         </html>
       `;
 
+      // 에뮬레이터 환경에서 PDF 생성 문제 해결
+      let directory;
+
+      try {
+        // 먼저 문서 디렉토리 확인 (더 안정적인 옵션)
+        const documentDir = FileSystem.documentDirectory;
+        const dirInfo = await FileSystem.getInfoAsync(documentDir);
+
+        if (dirInfo.exists && dirInfo.isDirectory) {
+          directory = documentDir;
+        } else {
+          // 폴백으로 캐시 디렉토리 사용
+          directory = FileSystem.cacheDirectory;
+        }
+
+        console.log('PDF 저장 디렉토리:', directory);
+      } catch (dirError) {
+        console.log('디렉토리 확인 오류:', dirError);
+        // 오류 발생 시 기본값으로 캐시 디렉토리 사용
+        directory = FileSystem.cacheDirectory;
+      }
+
       const options = {
         html: htmlContent,
-        fileName: `${appName.replace(/\s+/g, '_')}_리뷰_요약`,
-        directory: FileSystem.cacheDirectory, // 캐시 디렉토리에 임시 저장
+        filename: `${appName.replace(/\s+/g, '_')}_리뷰_요약`,
+        directory: directory,
+        base64: true, // base64 형식으로도 반환 (파일 접근 문제 대비)
       };
 
-      const file = await RNHTMLtoPDF.convert(options);
+      console.log('PDF 변환 시작...');
+      try {
+        const file = await RNHTMLtoPDF.convert(options);
+        console.log('PDF 변환 결과:', file);
 
-      // PDF 생성 성공
-      if (file.filePath) {
+        if (!file) {
+          throw new Error('PDF 변환 결과가 없습니다.');
+        }
+
+        // file 객체의 구조 확인 및 처리
+        const filePath = file.filePath || file.filepath || file.path;
+        if (!filePath) {
+          throw new Error('PDF 파일 경로가 생성되지 않았습니다.');
+        }
+
+        console.log('PDF 변환 완료:', filePath);
+
+        // PDF 생성 성공
+        console.log('생성된 PDF 경로:', filePath);
+
         Alert.alert(
           "PDF 생성 완료",
           "PDF가 생성되었습니다. 저장 위치를 선택해주세요.",
@@ -946,14 +988,90 @@ function AISummaryScreen({ route, navigation }) {
             },
             {
               text: "저장/공유",
-              onPress: () => shareFile(file.filePath)
+              onPress: async () => {
+                try {
+                  // 파일 경로가 file:// 프로토콜로 시작하는지 확인
+                  const fullPath = filePath.startsWith('file://')
+                    ? filePath
+                    : `file://${filePath}`;
+
+                  // 파일 존재 여부 확인 전에 경로 정규화
+                  const normalizedPath = fullPath.replace('file://', '');
+
+                  try {
+                    // 파일이 존재하는지 확인
+                    const fileInfo = await FileSystem.getInfoAsync(normalizedPath);
+                    if (!fileInfo.exists) {
+                      console.error('파일이 존재하지 않음:', normalizedPath);
+
+                      // base64 데이터가 있으면 임시 파일 생성 시도
+                      if (file.base64) {
+                        console.log('base64 데이터로 임시 파일 생성 시도');
+                        const tempFilePath = `${FileSystem.cacheDirectory}temp_${Date.now()}.pdf`;
+                        await FileSystem.writeAsStringAsync(
+                          tempFilePath,
+                          file.base64,
+                          { encoding: FileSystem.EncodingType.Base64 }
+                        );
+
+                        // 새로 생성한 파일 공유
+                        await Sharing.shareAsync(tempFilePath, {
+                          mimeType: 'application/pdf',
+                          dialogTitle: `${appName} 리뷰 요약`,
+                          UTI: 'com.adobe.pdf'
+                        });
+                        return;
+                      }
+
+                      throw new Error('파일을 찾을 수 없습니다.');
+                    }
+
+                    console.log('공유할 파일 경로:', normalizedPath);
+                    console.log('파일 정보:', fileInfo);
+
+                    // 파일 공유
+                    await Sharing.shareAsync(normalizedPath, {
+                      mimeType: 'application/pdf',
+                      dialogTitle: `${appName} 리뷰 요약`,
+                      UTI: 'com.adobe.pdf'
+                    });
+                  } catch (fsError) {
+                    console.error('파일 시스템 접근 오류:', fsError);
+                    // 파일 시스템 접근 실패 시 base64 데이터로 재시도
+                    if (file.base64) {
+                      console.log('base64 데이터로 임시 파일 생성 시도');
+                      const tempFilePath = `${FileSystem.cacheDirectory}temp_${Date.now()}.pdf`;
+                      await FileSystem.writeAsStringAsync(
+                        tempFilePath,
+                        file.base64,
+                        { encoding: FileSystem.EncodingType.Base64 }
+                      );
+
+                      // 새로 생성한 파일 공유
+                      await Sharing.shareAsync(tempFilePath, {
+                        mimeType: 'application/pdf',
+                        dialogTitle: `${appName} 리뷰 요약`,
+                        UTI: 'com.adobe.pdf'
+                      });
+                    } else {
+                      throw new Error('파일 시스템 접근에 실패했습니다.');
+                    }
+                  }
+                } catch (error) {
+                  console.error('파일 공유 상세 오류:', error);
+                  Alert.alert("오류", `파일 공유 중 오류가 발생했습니다: ${error.message}`);
+                }
+              }
             }
           ]
         );
+      } catch (pdfError) {
+        console.error('PDF 변환 중 오류 발생:', pdfError);
+        throw new Error(`PDF 변환 실패: ${pdfError.message}`);
       }
     } catch (error) {
       console.error('PDF 생성 오류:', error);
-      Alert.alert("오류", "PDF 생성 중 오류가 발생했습니다.");
+      Alert.alert("오류", `PDF 생성 중 오류가 발생했습니다: ${error.message}`);
     } finally {
       setDownloadingPDF(false);
     }
@@ -962,10 +1080,29 @@ function AISummaryScreen({ route, navigation }) {
   // 파일 공유 함수
   const shareFile = async (filePath) => {
     try {
-      await Sharing.shareAsync(filePath);
+      // 파일 경로가 file:// 프로토콜로 시작하는지 확인
+      const fullPath = filePath.startsWith('file://')
+        ? filePath
+        : `file://${filePath}`;
+
+      // 파일이 존재하는지 확인
+      const fileInfo = await FileSystem.getInfoAsync(fullPath);
+      if (!fileInfo.exists) {
+        throw new Error('파일을 찾을 수 없습니다.');
+      }
+
+      console.log('공유할 파일 경로:', fullPath);
+      console.log('파일 정보:', fileInfo);
+
+      // 파일 공유
+      await Sharing.shareAsync(fullPath, {
+        mimeType: 'application/pdf',
+        dialogTitle: `${appName} 리뷰 요약`,
+        UTI: 'com.adobe.pdf'
+      });
     } catch (error) {
-      console.error('파일 공유 오류:', error);
-      Alert.alert("오류", "파일 공유 중 오류가 발생했습니다.");
+      console.error('파일 공유 상세 오류:', error);
+      Alert.alert("오류", `파일 공유 중 오류가 발생했습니다: ${error.message}`);
     }
   };
 
