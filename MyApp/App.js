@@ -402,12 +402,6 @@ function AppListScreen({ navigation, route }) {
       const appName = route.params?.extractedAppName || `앱 (${appId})`;
       const appIcon = route.params?.extractedAppIcon || 'https://via.placeholder.com/180';
 
-      // 이미 존재하는 앱인지 확인 (의존성 순환 방지를 위해 함수 내부에서 appList 확인)
-      if (appList.some((app) => app.id === appId)) {
-        toast.show('이미 존재하는 앱입니다.', 'info');
-        return;
-      }
-
       // 새 앱 추가
       setAppList(prevList => [...prevList, {
         id: appId,
@@ -415,13 +409,17 @@ function AppListScreen({ navigation, route }) {
         icon: appIcon,
       }]);
 
-      // 성공 메시지 (다음 렌더링 사이클까지 지연)
+      // 성공 메시지
       setTimeout(() => {
         toast.show(`"${appName}" 앱이 추가되었습니다.`, 'success');
       }, 0);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route.params?.extractedPackageId, route.params?.extractedAppName, route.params?.extractedAppIcon]);
+
+    // 검색어 파라미터가 있으면 검색어 설정
+    if (route.params?.searchQuery) {
+      setSearchQuery(route.params.searchQuery);
+    }
+  }, [route.params?.extractedPackageId, route.params?.extractedAppName, route.params?.extractedAppIcon, route.params?.searchQuery]);
 
   // 검색어 지우기
   const handleClearSearch = () => {
@@ -720,12 +718,23 @@ function HelpScreen({ navigation }) {
         }),
       });
 
+      const result = await lambdaResponse.json();
+      console.log('Lambda 응답:', result);
+
       if (!lambdaResponse.ok) {
-        throw new Error('앱 정보 등록에 실패했습니다.');
+        throw new Error(`서버 오류: ${lambdaResponse.status}`);
       }
 
-      const result = await lambdaResponse.json();
-      if (!result.success) {
+      console.log('app_add_result:', result);
+      if (result.success) {
+        if (result.message && result.message.includes('이미 존재')) {
+          toast.show("이미 추가된 앱입니다. 앱 목록에서 검색해보세요.", "info");
+          // AppListScreen으로 돌아가면서 검색어 설정
+          navigation.navigate('AppList', {
+            searchQuery: appId
+          });
+          return;
+        }
         throw new Error(result.message || '앱 정보 등록에 실패했습니다.');
       }
 
@@ -738,7 +747,20 @@ function HelpScreen({ navigation }) {
 
     } catch (error) {
       console.error('앱 정보 가져오기 오류:', error);
-      toast.show(error.message || "앱 정보를 가져오는 중 오류가 발생했습니다.", "error");
+      let errorMessage = "앱 정보를 가져오는 중 오류가 발생했습니다.";
+
+      if (error.response) {
+        // 서버에서 응답이 왔지만 오류 상태 코드
+        errorMessage = `서버 오류: ${error.response.status}`;
+      } else if (error.request) {
+        // 요청은 보냈지만 응답을 받지 못함
+        errorMessage = "서버에 연결할 수 없습니다. 인터넷 연결을 확인해주세요.";
+      } else {
+        // 요청 설정 중에 오류 발생
+        errorMessage = error.message || "앱 정보를 가져오는 중 오류가 발생했습니다.";
+      }
+
+      toast.show(errorMessage, "error");
     }
   };
 
@@ -751,6 +773,42 @@ function HelpScreen({ navigation }) {
         Linking.openURL('https://play.google.com/store');
       });
   };
+
+  useEffect(() => {
+    const validateAndProcessLink = async () => {
+      if (!playStoreLink) return;
+
+      try {
+        // ID 추출 방법 1: ?id= 형식
+        let match = playStoreLink.match(/[?&]id=([^&]+)/);
+
+        // ID 추출 방법 2: apps/details/id= 형식
+        if (!match) {
+          match = playStoreLink.match(/apps\/details\/?id=([^&\s]+)/);
+        }
+
+        // ID 추출 방법 3: 직접 패키지명 입력한 경우
+        if (!match && playStoreLink.includes('.')) {
+          // com.example.app 형식으로 직접 입력한 것으로 간주
+          match = [null, playStoreLink.trim()];
+        }
+
+        if (match && match[1]) {
+          const extractedId = match[1];
+          await fetchAppInfo(extractedId);
+        } else {
+          toast.show("올바른 구글 플레이스토어 링크나 패키지명을 입력해주세요.", "error");
+        }
+      } catch (error) {
+        console.error('링크 처리 오류:', error);
+        toast.show("올바른 구글 플레이스토어 링크나 패키지명을 입력해주세요.", "error");
+      }
+    };
+
+    // 디바운스 처리
+    const timeoutId = setTimeout(validateAndProcessLink, 1000);
+    return () => clearTimeout(timeoutId);
+  }, [playStoreLink]);
 
   return (
     <ScrollView
@@ -767,28 +825,27 @@ function HelpScreen({ navigation }) {
         <>
           {/* 링크 직접 입력 섹션 */}
           <View style={styles.linkInputContainer}>
-            <PaperText style={styles.sectionTitle}>앱 링크 직접 입력</PaperText>
             <PaperText style={styles.instructionText}>
-              구글 플레이스토어 앱 링크를 붙여넣거나, 패키지명(예: com.kakao.talk)을 직접 입력하세요.
+              구글 플레이스토어 앱 링크를 붙여넣거나, 패키지명(예: com.kakao.talk)을 직접 입력하면 자동으로 추가됩니다.
             </PaperText>
 
-            <PaperTextInput
-              label="플레이스토어 링크 또는 패키지명"
-              value={playStoreLink}
-              onChangeText={setPlayStoreLink}
-              placeholder="https://play.google.com/store/apps/details?id=..."
-              style={styles.linkInput}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-
-            <PaperButton
-              mode="contained"
-              onPress={handleManualLink}
-              style={styles.addButton}
-            >
-              앱 추가하기
-            </PaperButton>
+            <View style={styles.linkInputRow}>
+              <PaperTextInput
+                label="플레이스토어 링크 또는 패키지명"
+                value={playStoreLink}
+                onChangeText={setPlayStoreLink}
+                placeholder="https://play.google.com/store/apps/details?id=..."
+                style={styles.linkInput}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <IconButton
+                icon="google-play"
+                mode="contained"
+                onPress={handleOpenPlayStore}
+                style={styles.playStoreIconButton}
+              />
+            </View>
           </View>
 
           <PaperText style={styles.sectionTitle}>플레이스토어 앱 연동</PaperText>
@@ -800,7 +857,7 @@ function HelpScreen({ navigation }) {
               <View style={styles.stepContent}>
                 <PaperText style={styles.stepTitle}>구글 플레이스토어 열기</PaperText>
                 <PaperText style={styles.stepDescription}>
-                  아래 버튼을 눌러 구글 플레이스토어 앱을 엽니다.
+                  오른쪽의 구글 플레이스토어 아이콘을 눌러 스토어를 엽니다.
                 </PaperText>
               </View>
             </View>
@@ -841,16 +898,6 @@ function HelpScreen({ navigation }) {
               </View>
             </View>
           </View>
-
-          <PaperButton
-            mode="contained"
-            icon="google-play"
-            onPress={handleOpenPlayStore}
-            style={styles.playStoreButton}
-            contentStyle={styles.playStoreButtonContent}
-          >
-            구글 플레이스토어 열기
-          </PaperButton>
         </>
       )}
     </ScrollView>
@@ -1349,7 +1396,7 @@ export default function App() {
               <Stack.Screen
                 name="Help"
                 component={HelpScreen}
-                options={{ title: '구글 플레이 스토어에서 앱 추가하기' }}
+                options={{ title: '앱 추가' }}
               />
               <Stack.Screen
                 name="Review"
@@ -1513,9 +1560,14 @@ const styles = StyleSheet.create({
     color: '#aaa',
     marginBottom: 12,
   },
+  linkInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   linkInput: {
+    flex: 1,
     backgroundColor: '#2C2C2C',
-    marginBottom: 16,
   },
   instructionContainer: {
     marginBottom: 24,
@@ -1554,12 +1606,9 @@ const styles = StyleSheet.create({
     color: '#aaa',
     lineHeight: 20,
   },
-  playStoreButton: {
-    marginTop: 8,
-    paddingVertical: 8,
-  },
-  playStoreButtonContent: {
-    height: 48,
+  playStoreIconButton: {
+    margin: 0,
+    backgroundColor: '#6200ee',
   },
   loadingContainer: {
     flex: 1,

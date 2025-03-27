@@ -67,7 +67,7 @@ def add_app_info(app_info_data):
     existing_app = get_app_info(app_id)
     if existing_app:
         return {
-            "success": False,
+            "success": True,
             "message": f"이미 존재하는 앱 ID입니다: {app_id}"
         }
 
