@@ -238,8 +238,17 @@ function AppListScreen({ navigation, route }) {
   // 새로고침 요청 진행 중 플래그 추가
   const isRefreshingRef = useRef(false);
 
-  // 앱 목록 가져오기
-  const fetchAppList = async () => {
+  // 마지막 새로고침 시간 추적 (쿨다운 관리)
+  const lastRefreshTimeRef = useRef(0);
+
+  // toast 함수를 ref로 저장하여 의존성에서 제외
+  const toastRef = useRef(toast);
+  useEffect(() => {
+    toastRef.current = toast;
+  }, [toast]);
+
+  // fetchAppList를 useCallback으로 감싸고 의존성을 명확히 함
+  const fetchAppList = useCallback(async () => {
     if (isRefreshingRef.current) {
       log('이미 새로고침 진행 중 - fetchAppList 중복 요청 무시');
       return Promise.resolve();
@@ -284,35 +293,56 @@ function AppListScreen({ navigation, route }) {
     } catch (err) {
       console.error('앱 목록 가져오기 오류:', err);
       setError(err.message);
-      toast.show('앱 목록을 가져오는데 실패했습니다.', 'error');
+      toastRef.current.show('앱 목록을 가져오는데 실패했습니다.', 'error');
     } finally {
       setLoading(false);
       setRefreshing(false);
       isRefreshingRef.current = false;
     }
     return Promise.resolve();
-  };
+  }, []);
 
-  // 새로고침 처리 함수
-  const handleRefresh = useCallback(async () => {
-    log('handleRefresh 호출됨');
-    if (refreshing || isRefreshingRef.current) {
-      log('이미 새로고침 중 - 요청 무시');
-      return;
-    }
+  // handleRefresh 함수를 useRef로 관리하여 의존성 사이클 끊기
+  const handleRefreshRef = useRef(async () => {
+    // 초기 빈 함수 - useEffect에서 실제 구현으로 교체됨
+    log('handleRefresh 초기화되지 않음');
+  });
 
-    try {
-      setRefreshing(true);
-      isRefreshingRef.current = true;
-      await fetchAppList();
-      toast.show('앱 목록이 새로고침되었습니다.', 'success');
-    } catch (error) {
-      console.error('새로고침 오류:', error);
-    } finally {
-      setRefreshing(false);
-      isRefreshingRef.current = false;
-    }
-  }, [refreshing, toast]);
+  // 최신 상태를 참조하기 위해 함수 내용 정의
+  useEffect(() => {
+    handleRefreshRef.current = async () => {
+      log('handleRefresh 호출됨');
+
+      // 이미 새로고침 중이면 무시
+      if (refreshing || isRefreshingRef.current) {
+        log('이미 새로고침 중 - 요청 무시');
+        return;
+      }
+
+      // 쿨다운 적용 (1초 이내 연속 새로고침 방지)
+      const now = Date.now();
+      if (now - lastRefreshTimeRef.current < 10000) {
+        // 몇 초 남았는지 toast
+        const remainingTime = Math.floor((10000 - (now - lastRefreshTimeRef.current)) / 1000);
+        toastRef.current.show(`${remainingTime}초 후에 새로고침 가능합니다.`, 'info');
+        return;
+      }
+
+      lastRefreshTimeRef.current = now;
+
+      try {
+        setRefreshing(true);
+        isRefreshingRef.current = true;
+        await fetchAppList();
+        toastRef.current.show('앱 목록이 새로고침되었습니다.', 'success');
+      } catch (error) {
+        console.error('새로고침 오류:', error);
+      } finally {
+        setRefreshing(false);
+        isRefreshingRef.current = false;
+      }
+    };
+  }, [refreshing, fetchAppList]);
 
   // 컴포넌트가 마운트될 때 fetchAppList 호출
   useEffect(() => {
@@ -335,9 +365,7 @@ function AppListScreen({ navigation, route }) {
     return () => {
       isMounted = false;
     };
-    // fetchAppList를 의존성에 넣으면 무한 루프가 발생할 수 있어 제외
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fetchAppList]);
 
   // route.params.refreshTrigger가 변경될 때마다 fetchAppList 호출
   const lastRefreshTriggerRef = useRef(null);
@@ -347,38 +375,43 @@ function AppListScreen({ navigation, route }) {
       route.params.refreshTrigger !== lastRefreshTriggerRef.current) {
       log('새로운 refreshTrigger 감지됨:', route.params.refreshTrigger);
       lastRefreshTriggerRef.current = route.params.refreshTrigger;
-
-      if (!refreshing && !isRefreshingRef.current) {
-        handleRefresh();
-      } else {
-        log('이미 새로고침 중 - refreshTrigger에 의한 요청 무시');
-      }
+      handleRefreshRef.current();
     }
-  }, [route.params?.refreshTrigger, handleRefresh, refreshing]);
+  }, [route.params?.refreshTrigger]);
 
-  // 명확한 참조를 위해 안정적인 refreshFunction 생성
-  const stableRefreshFunction = useCallback(() => {
-    log('안정적인 새로고침 함수 호출됨');
-    handleRefresh();
-  }, [handleRefresh]);
+  // appContext와 의존성 순환을 끊기 위해 useEffect 분리
+  const appContextRef = useRef(appContext);
 
-  // useFocusEffect 개선
+  useEffect(() => {
+    appContextRef.current = appContext;
+  }, [appContext]);
+
+  // useFocusEffect - 컨텍스트에 새로고침 함수 등록 (의존성 제거)
   useFocusEffect(
     useCallback(() => {
       log('AppListScreen 포커스됨');
 
       if (initialLoadDone) {
         log('새로고침 함수 설정 완료');
-        appContext.setRefreshFunction(() => stableRefreshFunction);
+        // 다음 렌더링 사이클에서 실행되도록 setTimeout 사용
+        setTimeout(() => {
+          if (appContextRef.current && appContextRef.current.setRefreshFunction) {
+            appContextRef.current.setRefreshFunction(() => handleRefreshRef.current());
+          }
+        }, 0);
       } else {
         log('초기 로딩 중 - 새로고침 함수 설정 연기');
       }
 
       return () => {
         log('AppListScreen 포커스 해제');
-        appContext.setRefreshFunction(null);
+        setTimeout(() => {
+          if (appContextRef.current && appContextRef.current.setRefreshFunction) {
+            appContextRef.current.setRefreshFunction(null);
+          }
+        }, 0);
       };
-    }, [initialLoadDone, stableRefreshFunction, appContext])
+    }, [initialLoadDone])
   );
 
   // 검색어가 변경될 때마다 목록 필터링
@@ -395,31 +428,50 @@ function AppListScreen({ navigation, route }) {
     }
   }, [searchQuery, appList]);
 
+  // route.params 변경 처리를 위한 ref 추가
+  const prevRouteParamsRef = useRef({});
+
   // HelpScreen에서 넘어온 데이터 처리
   useEffect(() => {
-    if (route.params?.extractedPackageId) {
-      const appId = route.params.extractedPackageId;
+    const currentExtractedId = route.params?.extractedPackageId;
+    const prevExtractedId = prevRouteParamsRef.current.extractedPackageId;
+
+    // 새로운 앱 ID가 추가된 경우에만 처리 (중복 실행 방지)
+    if (currentExtractedId && currentExtractedId !== prevExtractedId) {
+      const appId = currentExtractedId;
       const appName = route.params?.extractedAppName || `앱 (${appId})`;
       const appIcon = route.params?.extractedAppIcon || 'https://via.placeholder.com/180';
 
       // 새 앱 추가
-      setAppList(prevList => [...prevList, {
-        id: appId,
-        name: appName,
-        icon: appIcon,
-      }]);
+      setAppList(prevList => {
+        // 이미 존재하는 앱인지 확인
+        if (prevList.some(app => app.id === appId)) {
+          return prevList;
+        }
+        return [...prevList, {
+          id: appId,
+          name: appName,
+          icon: appIcon,
+        }];
+      });
 
-      // 성공 메시지
+      // 성공 메시지 (0ms 타임아웃을 1ms로 변경해 렌더링 사이클 분리)
       setTimeout(() => {
-        toast.show(`"${appName}" 앱이 추가되었습니다.`, 'success');
-      }, 0);
+        toastRef.current.show(`"${appName}" 앱이 추가되었습니다.`, 'success');
+      }, 1);
     }
 
-    // 검색어 파라미터가 있으면 검색어 설정
-    if (route.params?.searchQuery) {
-      setSearchQuery(route.params.searchQuery);
+    // 검색어 파라미터가 있고 이전과 다른 경우에만 업데이트
+    const currentSearchQuery = route.params?.searchQuery;
+    const prevSearchQuery = prevRouteParamsRef.current.searchQuery;
+
+    if (currentSearchQuery && currentSearchQuery !== prevSearchQuery) {
+      setSearchQuery(currentSearchQuery);
     }
-  }, [route.params?.extractedPackageId, route.params?.extractedAppName, route.params?.extractedAppIcon, route.params?.searchQuery]);
+
+    // 현재 파라미터를 저장
+    prevRouteParamsRef.current = { ...route.params };
+  }, [route.params]);
 
   // 검색어 지우기
   const handleClearSearch = () => {
@@ -505,7 +557,7 @@ function AppListScreen({ navigation, route }) {
         <PaperText style={styles.errorText}>{error}</PaperText>
         <PaperButton
           mode="contained"
-          onPress={fetchAppList}
+          onPress={() => fetchAppList()}
           style={styles.retryButton}
         >
           다시 시도
@@ -550,7 +602,7 @@ function AppListScreen({ navigation, route }) {
           <IconButton
             icon="refresh"
             mode="contained"
-            onPress={handleRefresh}
+            onPress={() => handleRefreshRef.current()}
             loading={refreshing}
             disabled={refreshing}
             style={styles.refreshIconButton}
@@ -578,7 +630,7 @@ function AppListScreen({ navigation, route }) {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={handleRefresh}
+            onRefresh={() => handleRefreshRef.current()}
             colors={['#6200ee']}
           />
         }
@@ -910,7 +962,7 @@ function HelpScreen({ navigation }) {
  */
 function ReviewScreen({ route }) {
   const toast = useToast();
-  const { appId, appName } = route.params;
+  const { appId, appName, appIcon } = route.params;
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -1017,8 +1069,13 @@ function ReviewScreen({ route }) {
   return (
     <View style={styles.container}>
       <View style={styles.headerContainer}>
+        <Image
+          source={{ uri: appIcon }}
+          style={styles.headerAppIcon}
+          defaultSource={require('./assets/app-placeholder.png')}
+        />
         <PaperText variant="titleLarge" style={{ textAlign: 'center', flex: 1 }}>
-          {appName} ({appId}) 리뷰
+          {appName}
         </PaperText>
         <PaperButton
           mode="contained"
@@ -1273,11 +1330,15 @@ function AISummaryScreen({ route, navigation }) {
 /**
  * 메인 App 컴포넌트
  */
+// App.js의 개선된 버전 - 불필요한 triggerRefresh 로직 제거
+// AppContext 간소화
+/**
+ * 메인 App 컴포넌트
+ */
 export default function App() {
   const [initialUrl, setInitialUrl] = useState(null);
+  // refreshFunction만 유지하고 관련 상태는 제거
   const [refreshFunction, setRefreshFunction] = useState(null);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const lastRefreshTimeRef = useRef(0);
 
   // 앱이 백그라운드에서 실행될 때 딥링크 처리
   useEffect(() => {
@@ -1303,54 +1364,6 @@ export default function App() {
     };
   }, []);
 
-  const triggerRefresh = useCallback(() => {
-    log('triggerRefresh 호출됨');
-
-    // 새로고침 중이면 무시
-    if (isRefreshing) {
-      log('이미 새로고침 중 - 요청 무시');
-      return;
-    }
-
-    // 빠르게 연속적인 새로고침 방지 (최소 1초 간격)
-    const now = Date.now();
-    if (now - lastRefreshTimeRef.current < 1000) {
-      log('너무 빠른 새로고침 요청 무시 (1초 이내)');
-      return;
-    }
-
-    lastRefreshTimeRef.current = now;
-
-    if (refreshFunction) {
-      log('저장된 새로고침 함수 실행');
-      setIsRefreshing(true);
-
-      // 새로고침 함수 호출 후 상태 업데이트
-      Promise.resolve(refreshFunction())
-        .finally(() => {
-          setIsRefreshing(false);
-        });
-    } else if (navigationRef.current) {
-      log('navigationRef를 통한 새로고침');
-      const currentRoute = navigationRef.current.getCurrentRoute();
-
-      if (currentRoute?.name === 'AppList') {
-        setIsRefreshing(true);
-
-        navigationRef.current.dispatch(
-          CommonActions.setParams({
-            refreshTrigger: now
-          })
-        );
-
-        // 일정 시간 후 새로고침 상태 해제 (안전장치)
-        setTimeout(() => {
-          setIsRefreshing(false);
-        }, 3000);
-      }
-    }
-  }, [refreshFunction, isRefreshing]);
-
   // 공유된 URL이 있으면 Help 화면 표시 준비
   const linking = {
     prefixes: ['appreviewanalyzer://', 'https://play.google.com'],
@@ -1367,12 +1380,16 @@ export default function App() {
     },
   };
 
-  // 앱 전반에서 사용할 컨텍스트 값
+  // 앱 전반에서 사용할 컨텍스트 값 - 간소화된 버전
   const appContextValue = {
-    triggerRefresh,
+    refreshFunction,
     setRefreshFunction,
-    isRefreshing,
-    setIsRefreshing
+    // triggerRefresh 제거하고 직접 refreshFunction 호출하도록 수정
+    triggerRefresh: useCallback(() => {
+      if (refreshFunction) {
+        refreshFunction();
+      }
+    }, [refreshFunction])
   };
 
   return (
@@ -1653,6 +1670,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 12,
+    backgroundColor: '#1E1E1E',
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  headerAppIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    marginRight: 12,
   },
   summaryButton: {
     marginLeft: 'auto',
