@@ -1,0 +1,72 @@
+========= React Native 환경 정보 =========
+생성 일시: 2025. 03. 28. (금) 23:16:12 KST
+=========================================
+
+[시스템 정보]
+운영체제: Linux
+운영체제 버전: 5.15.0-134-generic
+
+[Node.js 정보]
+Node.js 버전: v20.18.1
+npm 버전: 10.8.2
+Yarn 버전: 1.22.22
+
+[Expo 정보]
+Expo CLI 버전: 0.22.21
+
+[package.json 의존성 정보]
+React Native 버전: 0.76.7
+Expo 버전: ~52.0.38
+React 버전: 18.3.1
+React Native Google Mobile Ads 버전: 정보 없음
+
+[전체 의존성 목록]
+@react-navigation/native: ^7.0.15
+@react-navigation/native-stack: ^7.2.1
+axios: ^1.8.4
+expo: ~52.0.38
+expo-dev-client: ~5.0.15
+expo-file-system: ~18.0.11
+expo-linking: ^7.0.5
+expo-print: ~14.0.3
+expo-sharing: ~13.0.1
+expo-status-bar: ~2.0.1
+expo-web-browser: ^14.0.2
+marked: ^15.0.7
+ngrok: ^5.0.0-beta.2
+react: 18.3.1
+react-native: 0.76.7
+react-native-cheerio: ^1.0.0-rc.4
+react-native-html-to-pdf: ^0.12.0
+react-native-markdown-display: ^7.0.2
+react-native-paper: ^5.13.1
+react-native-safe-area-context: 4.12.0
+react-native-screens: ~4.4.0
+
+[개발 의존성 목록]
+@babel/core: ^7.20.0
+
+[Expo 앱 설정 정보]
+Expo SDK 버전: 정보 없음
+앱 이름: MyApp
+앱 버전: 1.0.0
+
+[iOS 정보]
+iOS 디렉토리가 존재합니다.
+Podfile 존재: 예
+iOS 최소 버전: 정보 없음
+
+[Android 정보]
+Android 디렉토리가 존재합니다.
+compileSdkVersion: 정보 없음
+minSdkVersion: 정보 없음
+targetSdkVersion: 정보 없음
+
+[Metro 설정 정보]
+metro.config.js 파일이 존재하지 않습니다.
+
+[Babel 설정 정보]
+Babel 설정 파일이 존재하지 않습니다.
+
+=========================================
+환경 정보가 react_native_environment_info.txt 파일에 저장되었습니다.
