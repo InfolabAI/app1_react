@@ -319,7 +319,7 @@ function AppListScreen({ navigation, route }) {
         return;
       }
 
-      // 쿨다운 적용 (1초 이내 연속 새로고침 방지)
+      // 쿨다운 적용 (10초 이내 연속 새로고침 방지)
       const now = Date.now();
       if (now - lastRefreshTimeRef.current < 10000) {
         // 몇 초 남았는지 toast
