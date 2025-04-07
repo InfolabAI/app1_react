@@ -6,6 +6,7 @@ import pandas as pd
 from llm import LLM
 from datetime import datetime, timedelta
 from decimal import Decimal
+from lambda_user_table import save_user, get_user_by_google_id
 
 # 상수 정의
 PROMPT = "아래 리뷰 내용들을 마크 다운 보고서로 요약해주세요. 헤더 # 3개(1. 요약 기간 2. 주요 문제점 3. 개선 아이디어). 각 헤더 # 마다, 하위 헤더 ## 를 통해 상세 내용 작성. 개선 아이디어 헤더에서는 해결하려는 문제 헤더 ## 마다 구현 ### 난이도 상, ### 난이도 중, ### 난이도 하 헤더로 아이디어 제공.\n"
@@ -504,6 +505,59 @@ def lambda_handler(event, context):
                 "statusCode": 200,
                 "body": json.dumps(summary_result, default=str)
             }
+            
+        # 5. 사용자 정보 저장 및 로그인
+        elif request_type == 'user_login':
+            google_id = body_dict.get('google_id')
+            email = body_dict.get('email')
+            
+            if not google_id or not email:
+                return {
+                    "statusCode": 400,
+                    "body": json.dumps({"error": "google_id와 email 파라미터가 필요합니다."})
+                }
+            
+            # 사용자 정보 저장 (또는 업데이트)
+            try:
+                user_info = save_user(google_id, email)
+                return {
+                    "statusCode": 200,
+                    "body": json.dumps({"user": user_info}, default=str)
+                }
+            except Exception as e:
+                return {
+                    "statusCode": 500,
+                    "body": json.dumps({"error": f"사용자 저장 중 오류 발생: {str(e)}"})
+                }
+                
+        # 6. 사용자 정보 조회
+        elif request_type == 'user_info':
+            google_id = body_dict.get('google_id')
+            
+            if not google_id:
+                return {
+                    "statusCode": 400,
+                    "body": json.dumps({"error": "google_id 파라미터가 필요합니다."})
+                }
+            
+            # 사용자 정보 조회
+            try:
+                user_info = get_user_by_google_id(google_id)
+                if not user_info:
+                    return {
+                        "statusCode": 404,
+                        "body": json.dumps({"error": f"구글 ID '{google_id}'를 가진 사용자를 찾을 수 없습니다."})
+                    }
+                
+                return {
+                    "statusCode": 200,
+                    "body": json.dumps({"user": user_info}, default=str)
+                }
+            except Exception as e:
+                return {
+                    "statusCode": 500,
+                    "body": json.dumps({"error": f"사용자 조회 중 오류 발생: {str(e)}"})
+                }
 
         else:
             return {
@@ -553,10 +607,40 @@ if __name__ == "__main__":
     }
 
     # 리뷰 요약 테스트
-    event4 = { "body": { "request_type": "summary", "app_id": "com.nianticlabs.pokemongo" } }
+    event4 = { 
+        "body": { 
+            "request_type": "summary", 
+            "app_id": "com.nianticlabs.pokemongo" 
+        } 
+    }
+    
+    # 사용자 로그인/등록 테스트
+    event5 = {
+        "body": {
+            "request_type": "user_login",
+            "google_id": "google123456789",
+            "email": "user@example.com"
+        }
+    }
+    
+    # 사용자 정보 조회 테스트
+    event6 = {
+        "body": {
+            "request_type": "user_info",
+            "google_id": "google123456789"
+        }
+    }
+
+    # 사용자 정보 없음 조회 테스트
+    event7 = {
+        "body": {
+            "request_type": "user_info",
+            "google_id": "google1234567890"
+        }
+    }
 
     # 여기에서 원하는 테스트 이벤트 선택
-    test_event = event4
+    test_event = event6  # 사용자 로그인 테스트
     response = lambda_handler(test_event, None)
-    breakpoint()
     print(json.dumps(response, indent=2))
+    
