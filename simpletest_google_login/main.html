@@ -1,0 +1,138 @@
+<!-- python -m http.server 8000 then, go to http://localhost:8000/main.html with browser-->
+<!-- to create client id in google cloud console, you need to input http://localhost:8000 and http://localhost:8000/main.html as authorized javascript origins and authorized redirect URIs-->
+
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Google OAuth Test</title>
+    <meta name="google-signin-client_id"
+        content="7253862100-vhd5sf3uhaipilqtroi1576lvvqp9oqj.apps.googleusercontent.com">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/google-api-javascript-client/1.1.0/client.js"></script>
+    <script src="https://accounts.google.com/gsi/client"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        button {
+            padding: 10px 15px;
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px 0;
+        }
+
+        #result {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            min-height: 100px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Google OAuth Client ID Test</h1>
+
+    <div>
+        <button id="signIn">Google Login</button>
+        <button id="revoke">Logout</button>
+    </div>
+
+    <div id="result">
+        <p>Login results will be displayed here.</p>
+    </div>
+
+    <script>
+        // Google OAuth Client ID
+        const CLIENT_ID = '7253862100-vhd5sf3uhaipilqtroi1576lvvqp9oqj.apps.googleusercontent.com';
+
+        // Login button setup
+        document.getElementById('signIn').addEventListener('click', () => {
+            // Redirect to Google's OAuth 2.0 endpoint
+            const oauth2Endpoint = 'https://accounts.google.com/o/oauth2/v2/auth';
+
+            // Set request parameters
+            const form = document.createElement('form');
+            form.setAttribute('method', 'GET');
+            form.setAttribute('action', oauth2Endpoint);
+
+            // Add parameters
+            const params = {
+                'client_id': CLIENT_ID,
+                'redirect_uri': window.location.origin + window.location.pathname,
+                'response_type': 'token',
+                'scope': 'https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email',
+                'include_granted_scopes': 'true',
+                'state': 'pass-through-value'
+            };
+
+            // Add parameters to form
+            for (let p in params) {
+                const input = document.createElement('input');
+                input.setAttribute('type', 'hidden');
+                input.setAttribute('name', p);
+                input.setAttribute('value', params[p]);
+                form.appendChild(input);
+            }
+
+            // Submit form (Redirect to Google OAuth page)
+            document.body.appendChild(form);
+            form.submit();
+        });
+
+        // Logout button setup
+        document.getElementById('revoke').addEventListener('click', () => {
+            const resultElement = document.getElementById('result');
+            resultElement.innerHTML = '<p>You have been logged out.</p>';
+            // Delete token from local storage
+            localStorage.removeItem('google_access_token');
+        });
+
+        // Check for token in URL when page loads
+        window.onload = function () {
+            const resultElement = document.getElementById('result');
+
+            // Extract access token from URL hash
+            if (window.location.hash) {
+                const hash = window.location.hash.substring(1);
+                const params = new URLSearchParams(hash);
+                const accessToken = params.get('access_token');
+
+                if (accessToken) {
+                    // Save token
+                    localStorage.setItem('google_access_token', accessToken);
+
+                    // Get user information
+                    fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}`
+                        }
+                    })
+                        .then(response => response.json())
+                        .then(data => {
+                            resultElement.innerHTML = `
+              <h3>Login Successful!</h3>
+              <p>Name: ${data.name}</p>
+              <p>Email: ${data.email}</p>
+              <p>Profile Image: <img src="${data.picture}" width="50" height="50"></p>
+              <p>Access Token: ${accessToken.substring(0, 10)}...</p>
+            `;
+                        })
+                        .catch(error => {
+                            resultElement.innerHTML = `<p>Error occurred: ${error.message}</p>`;
+                        });
+                }
+            }
+        };
+    </script>
+</body>
+
+</html>

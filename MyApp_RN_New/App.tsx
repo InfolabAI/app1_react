@@ -91,18 +91,18 @@ mobileAds()
 // Google Sign-In 설정 수정
 GoogleSignin.configure({
   // Android 디바이스를 위한 웹 클라이언트 ID 설정
-  webClientId: '7253862100-0db3qgjubmp5anp878rd5a8t1v8jtaf1.apps.googleusercontent.com',
+  webClientId: '7253862100-gt5oklb7ikkhogn81kvsibdv45n9nb83.apps.googleusercontent.com',
   // iOS 디바이스를 위한 iOS 클라이언트 ID (필요한 경우)
   // iosClientId: 'YOUR_IOS_CLIENT_ID.apps.googleusercontent.com',
   offlineAccess: true,
-  forceCodeForRefreshToken: true, // 인증 코드 강제 새로고침
+  //forceCodeForRefreshToken: true, // 인증 코드 강제 새로고침
   //accountName: '', // 특정 계정으로 자동 선택 (선택 사항)
   //scopes: ['profile', 'email'],
   // 구글 Play 서비스 사용 불가 시 에러 핸들링 방식 설정
   //hostedDomain: '', // 특정 도메인으로 제한 (선택 사항)
   // 개발 모드에서 Google 웹 로그인 사용 (선택 사항)
   //uxMode: 'POPUP', // REDIRECT 또는 POPUP
-});
+}); //
 
 // Use test ad unit ID in development, replace with actual ID in production
 const adUnitId = __DEV__ ? TestIds.BANNER : 'ca-app-pub-7838208657677503/6303324511'; // TestIds.BANNER 라는 구글에서 제공하는 test ID 를 사용하다가 실제 앱 배포시에는 실제 앱의 광고단위 아이디를 사용.
@@ -265,42 +265,46 @@ const AuthProvider: React.FC<ToastProviderProps> = ({ children }) => {
 
       console.log('🔍 로그인: Google 로그인 시도');
       const userInfo = await GoogleSignin.signIn();
-      console.log('🔍 로그인: Google 로그인 성공', userInfo.user.email);
+      console.log('🔍 로그인: Google 로그인 성공');
+      console.log('유저 정보', userInfo);
+      console.log('유저 정보 중 user 정보', userInfo.data.user);
 
       // userInfo is correctly typed by the library
       const userData: UserInfo = {
-        id: userInfo.user.id,
-        email: userInfo.user.email,
-        name: userInfo.user.name,
-        photo: userInfo.user.photo || undefined
+        id: userInfo.data.user.id,
+        email: userInfo.data.user.email,
+        name: userInfo.data.user.name,
+        photo: userInfo.data.user.photo || undefined
       };
 
-      // Save to server
-      try {
-        console.log('🔍 로그인: 서버 로그인 시도');
-        const response = await fetchFromAPI('user_login', {
-          google_id: userData.id,
-          email: userData.email
-        });
-        console.log('🔍 로그인: 서버 응답', response);
+      setUser(userData);
 
-        if (response.user) {
-          // Save to local storage
-          console.log('🔍 로그인: 로컬 스토리지에 사용자 정보 저장');
-          await AsyncStorage.setItem('@user', JSON.stringify(userData));
-          setUser(userData);
-          toast.show('로그인 되었습니다.', 'success');
-        } else {
-          console.log('🚨 오류: 서버 응답에 사용자 정보 없음');
-          throw new Error('서버에 사용자 정보를 저장하는데 실패했습니다.');
-        }
-      } catch (error) {
-        console.error('🚨 오류: 서버 로그인 오류:', error);
-        console.log('🔍 로그인: 구글 로그아웃 시도');
-        toast.show('서버 통신 중 오류가 발생했습니다.', 'error');
-        // Sign out from Google as server login failed
-        await GoogleSignin.signOut();
-      }
+      // Save to server
+      //try {
+      //  console.log('🔍 로그인: 서버 로그인 시도');
+      //  const response = await fetchFromAPI('user_login', {
+      //    google_id: userData.id,
+      //    email: userData.email
+      //  });
+      //  console.log('🔍 로그인: 서버 응답', response);
+
+      //  if (response.user) {
+      //    // Save to local storage
+      //    console.log('🔍 로그인: 로컬 스토리지에 사용자 정보 저장');
+      //    await AsyncStorage.setItem('@user', JSON.stringify(userData));
+      //    setUser(userData);
+      //    toast.show('로그인 되었습니다.', 'success');
+      //  } else {
+      //    console.log('🚨 오류: 서버 응답에 사용자 정보 없음');
+      //    throw new Error('서버에 사용자 정보를 저장하는데 실패했습니다.');
+      //  }
+      //} catch (error) {
+      //  console.error('🚨 오류: 서버 로그인 오류:', error);
+      //  console.log('🔍 로그인: 구글 로그아웃 시도');
+      //  toast.show('서버 통신 중 오류가 발생했습니다.', 'error');
+      //  // Sign out from Google as server login failed
+      //  await GoogleSignin.signOut();
+      //}
     } catch (error: any) {
       if (error.code === statusCodes.SIGN_IN_CANCELLED) {
         // user cancelled the login flow
@@ -359,10 +363,18 @@ const fetchFromAPI = async (requestType: string, params = {}) => {
   console.log(`🔍 API 요청: ${requestType}`, params);
 
   try {
+    // Ensure request_type is properly included in the request body
+    const requestBody = {
+      request_type: requestType,
+      ...params
+    };
+
+    console.log(`🔍 API 요청 본문:`, JSON.stringify(requestBody));
+
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ request_type: requestType, ...params }),
+      body: JSON.stringify(requestBody),
     });
 
     console.log(`🔍 API 응답 상태: ${response.status}`);

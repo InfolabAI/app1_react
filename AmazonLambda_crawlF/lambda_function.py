@@ -8,16 +8,16 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from lambda_user_table import save_user, get_user_by_google_id
 
-# 상수 정의
+# Constants definition
 PROMPT = "아래 리뷰 내용들을 마크 다운 보고서로 요약해주세요. 헤더 # 3개(1. 요약 기간 2. 주요 문제점 3. 개선 아이디어). 각 헤더 # 마다, 하위 헤더 ## 를 통해 상세 내용 작성. 개선 아이디어 헤더에서는 해결하려는 문제 헤더 ## 마다 구현 ### 난이도 상, ### 난이도 중, ### 난이도 하 헤더로 아이디어 제공.\n"
 
-# DynamoDB 리소스 초기화
+# DynamoDB resource initialization
 dynamodb = boto3.resource('dynamodb')
 app_info_table = dynamodb.Table('AppInfo')
 app_review_table = dynamodb.Table('AppReview')
 app_summary_table = dynamodb.Table('AppSummary')
 
-# 요청 본문 파싱 함수
+# Request body parsing function
 
 
 def cover_api_and_invoke(event, context):
@@ -29,50 +29,50 @@ def cover_api_and_invoke(event, context):
         raise Exception("'body' is not found in input")
     return body_dict
 
-# 앱 정보 관련 함수들
+# App information related functions
 
 
 def get_all_app_info():
-    """모든 앱 정보 조회"""
+    """Retrieve all app information"""
     try:
         response = app_info_table.scan()
         return response.get('Items', [])
     except Exception as e:
-        print(f"앱 정보 조회 중 오류: {str(e)}")
+        print(f"Error retrieving app information: {str(e)}")
         raise e
 
 
 def get_app_info(app_id):
-    """특정 앱 정보 조회"""
+    """Retrieve specific app information"""
     try:
         response = app_info_table.get_item(
             Key={'app_id': app_id}
         )
         return response.get('Item')
     except Exception as e:
-        print(f"앱 정보 조회 중 오류 (app_id={app_id}): {str(e)}")
+        print(f"Error retrieving app information (app_id={app_id}): {str(e)}")
         raise e
 
 
 def add_app_info(app_info_data):
-    """앱 정보 추가"""
+    """Add app information"""
     app_id = app_info_data.get('app_id')
     app_name = app_info_data.get('app_name')
     app_logo = app_info_data.get('app_logo')
 
-    # 필수 정보 검증
+    # Required information validation
     if not app_id or not app_name:
-        raise ValueError("app_id와 app_name은 필수 입력값입니다.")
+        raise ValueError("app_id and app_name are required input values.")
 
-    # 중복 체크
+    # Duplicate check
     existing_app = get_app_info(app_id)
     if existing_app:
         return {
             "success": True,
-            "message": f"이미 존재하는 앱 ID입니다: {app_id}"
+            "message": f"App ID already exists: {app_id}"
         }
 
-    # 새 앱 정보 저장
+    # Save new app information
     try:
         app_info_table.put_item(
             Item={
@@ -85,21 +85,21 @@ def add_app_info(app_info_data):
         )
         return {
             "success": True,
-            "message": f"앱 정보가 성공적으로 등록되었습니다: {app_name}"
+            "message": f"App information successfully registered: {app_name}"
         }
     except Exception as e:
-        print(f"앱 정보 등록 중 오류: {str(e)}")
+        print(f"Error registering app information: {str(e)}")
         raise e
 
-# 리뷰 관련 함수들
+# Review related functions
 
 
 def get_latest_review_date(app_id):
-    """특정 앱의 가장 최신 리뷰 날짜 조회"""
+    """Retrieve the most recent review date for a specific app"""
     try:
         response = app_review_table.query(
             KeyConditionExpression=Key('app_id').eq(app_id),
-            ScanIndexForward=False,  # 내림차순 정렬
+            ScanIndexForward=False,  # Descending order
             Limit=1
         )
 
@@ -108,12 +108,12 @@ def get_latest_review_date(app_id):
             return items[0].get('date')
         return None
     except Exception as e:
-        print(f"최신 리뷰 날짜 조회 중 오류 (app_id={app_id}): {str(e)}")
+        print(f"Error retrieving latest review date (app_id={app_id}): {str(e)}")
         return None
 
 
 def get_app_reviews(app_id):
-    """특정 앱의 모든 리뷰 조회"""
+    """Retrieve all reviews for a specific app"""
     try:
         all_reviews = []
         last_evaluated_key = None
@@ -137,61 +137,61 @@ def get_app_reviews(app_id):
 
         return all_reviews
     except Exception as e:
-        print(f"앱 리뷰 조회 중 오류 (app_id={app_id}): {str(e)}")
+        print(f"Error retrieving app reviews (app_id={app_id}): {str(e)}")
         raise e
 
 
 def fetch_and_save_new_reviews(app_id, latest_review_date=None):
-    """스토어에서 새 리뷰를 가져와 중복 없이 DB에 저장"""
+    """Fetch new reviews from the store and save to DB without duplicates"""
     try:
-        # 기존에 저장된 리뷰 정보 가져오기 (중복 체크용)
+        # Get existing review information (for duplicate checking)
         existing_reviews = get_app_reviews(app_id)
 
-        # 기존 리뷰의 고유 식별자 세트 생성 (리뷰ID, 사용자이름+내용)
+        # Create a set of unique identifiers for existing reviews (reviewID, username+content)
         existing_review_ids = set()
         existing_review_signatures = set()
 
         for review in existing_reviews:
-            # 리뷰 ID가 있으면 사용 (없으면 대체 식별자 생성)
+            # Use review ID if available (otherwise create alternative identifier)
             if 'reviewId' in review:
                 existing_review_ids.add(review['reviewId'])
 
-            # 추가 안전장치: 사용자명 + 내용의 첫 100자를 조합한 식별자
+            # Additional safety measure: identifier combining username + first 100 characters of content
             username = review.get('username', 'anonymous')
-            content = review.get('content', '')[:100]  # 내용 앞부분만 사용
+            content = review.get('content', '')[:100]  # Use only the beginning of content
             review_signature = f"{username}:{content}"
             existing_review_signatures.add(review_signature)
 
-        print(f"기존 저장된 리뷰 수: {len(existing_reviews)}")
+        print(f"Number of existing stored reviews: {len(existing_reviews)}")
 
-        # Google Play 스토어에서 리뷰 가져오기
+        # Fetch reviews from Google Play store
         result_list, continuation_token = reviews(
             app_id,
             lang='ko',
             country='kr',
             sort=Sort.NEWEST,
             count=200,
-            filter_score_with=None  # 모든 점수 가져오기
+            filter_score_with=None  # Get all scores
         )
 
-        # 리뷰가 없으면 빈 리스트 반환
+        # Return empty list if no reviews
         if not result_list:
-            print("가져온 리뷰가 없습니다.")
+            print("No reviews retrieved.")
             return []
 
-        print(f"Google Play에서 가져온 총 리뷰 수: {len(result_list)}")
+        print(f"Total number of reviews retrieved from Google Play: {len(result_list)}")
 
-        # 새 리뷰만 필터링
+        # Filter only new reviews
         new_reviews = []
         for review in result_list:
             review_id = review.get('reviewId', '')
 
-            # 대체 식별자 생성
+            # Create alternative identifier
             username = review.get('userName', 'anonymous')
             content = review.get('content', '')[:100]
             review_signature = f"{username}:{content}"
 
-            # 날짜 기준 필터링 (입력된 경우)
+            # Date-based filtering (if provided)
             date_filter_passed = True
             if latest_review_date:
                 latest_date = datetime.fromisoformat(latest_review_date)
@@ -199,7 +199,7 @@ def fetch_and_save_new_reviews(app_id, latest_review_date=None):
                 if review_date <= latest_date:
                     date_filter_passed = False
 
-            # 중복 체크: reviewId 또는 대체 식별자로 확인
+            # Duplicate check: verify by reviewId or alternative identifier
             is_duplicate = (
                 (review_id and review_id in existing_review_ids) or
                 (review_signature in existing_review_signatures)
@@ -208,59 +208,59 @@ def fetch_and_save_new_reviews(app_id, latest_review_date=None):
             if date_filter_passed and not is_duplicate:
                 new_reviews.append(review)
 
-        print(f"중복 제거 후 저장할 새 리뷰 수: {len(new_reviews)}")
+        print(f"Number of new reviews to save after removing duplicates: {len(new_reviews)}")
 
-        # DynamoDB에 새 리뷰 저장
+        # Save new reviews to DynamoDB
         if new_reviews:
             save_reviews_to_dynamodb(app_id, new_reviews)
 
         return new_reviews
     except Exception as e:
-        print(f"새 리뷰 가져오기 중 오류 (app_id={app_id}): {str(e)}")
+        print(f"Error fetching new reviews (app_id={app_id}): {str(e)}")
         raise e
 
 
 def save_reviews_to_dynamodb(app_id, reviews_data):
-    """리뷰 데이터를 DynamoDB에 저장 (중복 검사 포함)"""
+    """Save review data to DynamoDB (including duplicate check)"""
     try:
-        # 이미 저장된 키 목록을 가져오기 위한 준비
+        # Preparation to get list of already stored keys
         dynamodb = boto3.resource('dynamodb')
         table = dynamodb.Table('AppReview')
 
-        # 저장된 리뷰 수 추적
+        # Track number of saved reviews
         saved_count = 0
 
-        batch_size = 25  # DynamoDB 배치 작업 한계
+        batch_size = 25  # DynamoDB batch operation limit
         for i in range(0, len(reviews_data), batch_size):
             batch = reviews_data[i:i+batch_size]
 
-            # 배치 작성기 사용
+            # Use batch writer
             with table.batch_writer() as batch_writer:
                 for review in batch:
                     date_obj = review['at']
                     date_str = date_obj.strftime('%Y-%m-%d')
                     username = review.get('userName', 'anonymous')
 
-                    # 복합 키 생성
+                    # Create composite key
                     date_user_id = f"{date_str}#{username}"
 
-                    # float를 Decimal로 변환
+                    # Convert float to Decimal
                     score = Decimal(str(review['score']))
 
-                    # reviewId가 있으면 저장 (Google Play의 고유 식별자)
+                    # Save reviewId if available (Google Play's unique identifier)
                     review_id = review.get(
                         'reviewId', f"generated-{date_user_id}")
 
-                    # 저장 전 중복 확인 (선택 사항 - 성능 고려)
+                    # Duplicate check before saving (optional - performance consideration)
                     try:
-                        # 중복 체크는 옵션입니다. 필요시 주석 해제하세요.
+                        # Duplicate check is optional. Uncomment if needed.
                         # response = table.get_item(
                         #     Key={'app_id': app_id, 'date_user_id': date_user_id}
                         # )
                         # if 'Item' in response:
-                        #     continue  # 이미 존재하면 건너뜀
+                        #     continue  # Skip if already exists
 
-                        # 중복이 아니라고 판단되어 저장
+                        # Save if determined not to be a duplicate
                         batch_writer.put_item(
                             Item={
                                 'app_id': app_id,
@@ -269,29 +269,29 @@ def save_reviews_to_dynamodb(app_id, reviews_data):
                                 'username': username,
                                 'score': score,
                                 'content': review['content'],
-                                'reviewId': review_id,  # 고유 식별자 저장
+                                'reviewId': review_id,  # Save unique identifier
                                 'created_at': datetime.now().isoformat()
                             }
                         )
                         saved_count += 1
                     except Exception as item_error:
-                        print(f"개별 리뷰 저장 중 오류: {str(item_error)}")
+                        print(f"Error saving individual review: {str(item_error)}")
 
-        print(f"총 {saved_count}개 리뷰 저장 완료")
+        print(f"Total {saved_count} reviews saved successfully")
         return True
     except Exception as e:
-        print(f"리뷰 저장 중 오류: {str(e)}")
+        print(f"Error saving reviews: {str(e)}")
         raise e
 
-# 요약 관련 함수들
+# Summary related functions
 
 
 def get_latest_summary(app_id):
-    """특정 앱의 가장 최신 요약 조회"""
+    """Retrieve the most recent summary for a specific app"""
     try:
         response = app_summary_table.query(
             KeyConditionExpression=Key('app_id').eq(app_id),
-            ScanIndexForward=False,  # 내림차순 정렬
+            ScanIndexForward=False,  # Descending order
             Limit=1
         )
 
@@ -300,48 +300,48 @@ def get_latest_summary(app_id):
             return items[0]
         return None
     except Exception as e:
-        print(f"최신 요약 조회 중 오류 (app_id={app_id}): {str(e)}")
+        print(f"Error retrieving latest summary (app_id={app_id}): {str(e)}")
         return None
 
 
 def generate_and_save_summary(app_id, reviews=None):
-    """리뷰 요약 생성 및 저장"""
+    """Generate and save review summary"""
     try:
-        # 리뷰 데이터가 없으면 DB에서 가져오기
+        # Get review data from DB if not provided
         if not reviews:
             reviews = get_app_reviews(app_id)
 
         if not reviews:
             return {
                 "success": False,
-                "message": "요약할 리뷰가 없습니다."
+                "message": "No reviews to summarize."
             }
 
-        # 리뷰 데이터 변환
+        # Convert review data
         df = pd.DataFrame(reviews)
         df['date'] = pd.to_datetime(df['date'])
 
-        # 요약 날짜 범위 계산
+        # Calculate summary date range
         first_date = df['date'].min().strftime('%Y-%m-%d')
         last_date = df['date'].max().strftime('%Y-%m-%d')
 
-        # LLM 요약 생성
+        # Generate LLM summary
         llm = LLM()
-        prompt = PROMPT + f"아래는 {first_date}부터 {last_date}까지의 리뷰들입니다."
+        prompt = PROMPT + f"Below are reviews from {first_date} to {last_date}."
 
-        # 리뷰 내용 추출
+        # Extract review content
         text_list = df['content'].tolist()
         selected_text_list = llm.sampling(text_list)
         selected_texts = ' '.join(selected_text_list)
 
-        # 요약 생성
+        # Generate summary
         summary = llm(prompt, selected_texts)
 
-        # 요약 정보 DynamoDB에 저장
-        # 중요: float를 Decimal로 변환
+        # Save summary information to DynamoDB
+        # Important: Convert float to Decimal
         scores_set = set()
         for score in df['score'].unique():
-            # score가 이미 Decimal이면 그대로 사용, 아니면 Decimal로 변환
+            # Use score as is if already Decimal, otherwise convert to Decimal
             if isinstance(score, Decimal):
                 scores_set.add(score)
             else:
@@ -355,7 +355,7 @@ def generate_and_save_summary(app_id, reviews=None):
                 'date_range': date_range,
                 'start_date': first_date,
                 'end_date': last_date,
-                'scores': scores_set,  # Decimal 세트로 변환된 값
+                'scores': scores_set,  # Converted to Decimal set
                 'prompt': prompt,
                 'summary': summary,
                 'created_at': datetime.now().isoformat()
@@ -369,41 +369,41 @@ def generate_and_save_summary(app_id, reviews=None):
             "review_count": len(reviews)
         }
     except Exception as e:
-        print(f"요약 생성 및 저장 중 오류 (app_id={app_id}): {str(e)}")
+        print(f"Error generating and saving summary (app_id={app_id}): {str(e)}")
         raise e
 
-# 메인 Lambda 핸들러 함수
+# Main Lambda handler function
 
 
 def lambda_handler(event, context):
     try:
-        # 요청 본문 파싱
+        # Parse request body
         body_dict = cover_api_and_invoke(event, context)
-        print(f"요청 본문: {body_dict}")
+        print(f"Request body: {body_dict}")
 
-        # 요청 타입 확인
+        # Check request type
         request_type = body_dict.get('request_type')
         if not request_type:
             return {
                 "statusCode": 400,
-                "body": json.dumps({"error": "요청 타입(request_type)이 필요합니다."})
+                "body": json.dumps({"error": "Request type (request_type) is required."})
             }
 
-        # 1. 앱 정보 조회
+        # 1. App information retrieval
         if request_type == 'app_info_read':
             app_id = body_dict.get('app_id')
 
             if app_id:
-                # 특정 앱 정보 조회
+                # Retrieve specific app information
                 app_info = get_app_info(app_id)
                 if not app_info:
                     return {
                         "statusCode": 404,
-                        "body": json.dumps({"error": f"앱 ID '{app_id}'를 찾을 수 없습니다."})
+                        "body": json.dumps({"error": f"App ID '{app_id}' not found."})
                     }
                 response_data = {"app_info": app_info}
             else:
-                # 모든 앱 정보 조회
+                # Retrieve all app information
                 all_apps = get_all_app_info()
                 response_data = {"apps": all_apps}
 
@@ -412,7 +412,7 @@ def lambda_handler(event, context):
                 "body": json.dumps(response_data, default=str)
             }
 
-        # 2. 앱 정보 등록
+        # 2. App information registration
         elif request_type == 'app_info_add':
             result = add_app_info(body_dict)
 
@@ -427,41 +427,41 @@ def lambda_handler(event, context):
                     "body": json.dumps(result)
                 }
 
-        # 3. 리뷰 정보 조회
+        # 3. Review information retrieval
         elif request_type == 'app_review_read':
             app_id = body_dict.get('app_id')
 
             if not app_id:
                 return {
                     "statusCode": 400,
-                    "body": json.dumps({"error": "app_id 파라미터가 필요합니다."})
+                    "body": json.dumps({"error": "app_id parameter is required."})
                 }
 
-            # 앱 존재 확인
+            # Check if app exists
             app_info = get_app_info(app_id)
             if not app_info:
                 return {
                     "statusCode": 404,
-                    "body": json.dumps({"error": f"앱 ID '{app_id}'를 찾을 수 없습니다."})
+                    "body": json.dumps({"error": f"App ID '{app_id}' not found."})
                 }
 
-            # 최신 리뷰 날짜 확인
+            # Check latest review date
             latest_review_date = get_latest_review_date(app_id)
             today = datetime.now()
 
             new_reviews_added = False
 
-            # 저장된 리뷰가 없거나 오늘 날짜보다 이전인 경우 새 리뷰 가져오기
+            # Fetch new reviews if no stored reviews or if latest review is older than today
             if not latest_review_date or datetime.fromisoformat(latest_review_date).date() < today.date():
                 print(
-                    f"새 리뷰 가져오기: app_id={app_id}, latest_review_date={latest_review_date}")
+                    f"Fetching new reviews: app_id={app_id}, latest_review_date={latest_review_date}")
                 new_reviews = fetch_and_save_new_reviews(
                     app_id, latest_review_date)
                 if new_reviews:
                     new_reviews_added = True
-                    print(f"새 리뷰 {len(new_reviews)}개 저장 완료")
+                    print(f"{len(new_reviews)} new reviews saved successfully")
 
-            # 모든 리뷰 조회 (새로 추가된 리뷰 포함)
+            # Retrieve all reviews (including newly added ones)
             all_reviews = get_app_reviews(app_id)
 
             return {
@@ -473,32 +473,32 @@ def lambda_handler(event, context):
                 }, default=str)
             }
 
-        # 4. 리뷰 요약 요청
+        # 4. Review summary request
         elif request_type == 'summary':
             app_id = body_dict.get('app_id')
 
             if not app_id:
                 return {
                     "statusCode": 400,
-                    "body": json.dumps({"error": "app_id 파라미터가 필요합니다."})
+                    "body": json.dumps({"error": "app_id parameter is required."})
                 }
 
-            # 앱 존재 확인
+            # Check if app exists
             app_info = get_app_info(app_id)
             if not app_info:
                 return {
                     "statusCode": 404,
-                    "body": json.dumps({"error": f"앱 ID '{app_id}'를 찾을 수 없습니다."})
+                    "body": json.dumps({"error": f"App ID '{app_id}' not found."})
                 }
 
-            # 새 리뷰 확인 및 가져오기
+            # Check and fetch new reviews
             latest_review_date = get_latest_review_date(app_id)
             today = datetime.now()
 
             if not latest_review_date or datetime.fromisoformat(latest_review_date).date() < today.date():
                 fetch_and_save_new_reviews(app_id, latest_review_date)
 
-            # 요약 생성 및 저장
+            # Generate and save summary
             summary_result = generate_and_save_summary(app_id)
 
             return {
@@ -506,7 +506,7 @@ def lambda_handler(event, context):
                 "body": json.dumps(summary_result, default=str)
             }
             
-        # 5. 사용자 정보 저장 및 로그인
+        # 5. User information storage and login
         elif request_type == 'user_login':
             google_id = body_dict.get('google_id')
             email = body_dict.get('email')
@@ -514,10 +514,10 @@ def lambda_handler(event, context):
             if not google_id or not email:
                 return {
                     "statusCode": 400,
-                    "body": json.dumps({"error": "google_id와 email 파라미터가 필요합니다."})
+                    "body": json.dumps({"error": "google_id and email parameters are required."})
                 }
             
-            # 사용자 정보 저장 (또는 업데이트)
+            # Save user information (or update)
             try:
                 user_info = save_user(google_id, email)
                 return {
@@ -527,26 +527,26 @@ def lambda_handler(event, context):
             except Exception as e:
                 return {
                     "statusCode": 500,
-                    "body": json.dumps({"error": f"사용자 저장 중 오류 발생: {str(e)}"})
+                    "body": json.dumps({"error": f"Error occurred while saving user: {str(e)}"})
                 }
                 
-        # 6. 사용자 정보 조회
+        # 6. User information retrieval
         elif request_type == 'user_info':
             google_id = body_dict.get('google_id')
             
             if not google_id:
                 return {
                     "statusCode": 400,
-                    "body": json.dumps({"error": "google_id 파라미터가 필요합니다."})
+                    "body": json.dumps({"error": "google_id parameter is required."})
                 }
             
-            # 사용자 정보 조회
+            # Retrieve user information
             try:
                 user_info = get_user_by_google_id(google_id)
                 if not user_info:
                     return {
                         "statusCode": 404,
-                        "body": json.dumps({"error": f"구글 ID '{google_id}'를 가진 사용자를 찾을 수 없습니다."})
+                        "body": json.dumps({"error": f"User with Google ID '{google_id}' not found."})
                     }
                 
                 return {
@@ -556,13 +556,13 @@ def lambda_handler(event, context):
             except Exception as e:
                 return {
                     "statusCode": 500,
-                    "body": json.dumps({"error": f"사용자 조회 중 오류 발생: {str(e)}"})
+                    "body": json.dumps({"error": f"Error occurred while retrieving user: {str(e)}"})
                 }
 
         else:
             return {
                 "statusCode": 400,
-                "body": json.dumps({"error": f"지원하지 않는 요청 타입: {request_type}"})
+                "body": json.dumps({"error": f"Unsupported request type: {request_type}"})
             }
 
     except ValueError as ve:
@@ -572,23 +572,23 @@ def lambda_handler(event, context):
         }
     except Exception as e:
         error_message = f"{str(e)}, event={str(event)}"
-        print(f"오류 발생: {error_message}")
+        print(f"Error occurred: {error_message}")
         return {
             "statusCode": 500,
             "body": json.dumps({"error": error_message})
         }
 
 
-# 로컬 테스트용 코드
+# Local test code
 if __name__ == "__main__":
-    # 앱 정보 조회 테스트
+    # App information retrieval test
     event1 = {
         "body": {
             "request_type": "app_info_read"
         }
     }
 
-    # 앱 정보 등록 테스트
+    # App information registration test
     event2 = {
         "body": {
             "request_type": "app_info_add",
@@ -598,7 +598,7 @@ if __name__ == "__main__":
         }
     }
 
-    # 리뷰 정보 조회 테스트
+    # Review information retrieval test
     event3 = {
         "body": {
             "request_type": "app_review_read",
@@ -606,7 +606,7 @@ if __name__ == "__main__":
         }
     }
 
-    # 리뷰 요약 테스트
+    # Review summary test
     event4 = { 
         "body": { 
             "request_type": "summary", 
@@ -614,16 +614,10 @@ if __name__ == "__main__":
         } 
     }
     
-    # 사용자 로그인/등록 테스트
-    event5 = {
-        "body": {
-            "request_type": "user_login",
-            "google_id": "google123456789",
-            "email": "user@example.com"
-        }
-    }
+    # User login/registration test
+    event5 = { "body": { "request_type": "user_login", "google_id": "google123456789", "email": "user@example.com" } }
     
-    # 사용자 정보 조회 테스트
+    # User information retrieval test
     event6 = {
         "body": {
             "request_type": "user_info",
@@ -631,16 +625,11 @@ if __name__ == "__main__":
         }
     }
 
-    # 사용자 정보 없음 조회 테스트
-    event7 = {
-        "body": {
-            "request_type": "user_info",
-            "google_id": "google1234567890"
-        }
-    }
+    # User information not found test
+    event7 = { "body": { "request_type": "user_info", "google_id": "google1234567890" } }
 
-    # 여기에서 원하는 테스트 이벤트 선택
-    test_event = event6  # 사용자 로그인 테스트
+    # Select desired test event here
+    test_event = event6  # User login test
     response = lambda_handler(test_event, None)
     print(json.dumps(response, indent=2))
     
