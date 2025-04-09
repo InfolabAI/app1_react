@@ -277,34 +277,34 @@ const AuthProvider: React.FC<ToastProviderProps> = ({ children }) => {
         photo: userInfo.data.user.photo || undefined
       };
 
-      setUser(userData);
+      //setUser(userData);
 
       // Save to server
-      //try {
-      //  console.log('🔍 로그인: 서버 로그인 시도');
-      //  const response = await fetchFromAPI('user_login', {
-      //    google_id: userData.id,
-      //    email: userData.email
-      //  });
-      //  console.log('🔍 로그인: 서버 응답', response);
+      try {
+        console.log('🔍 로그인: 서버 로그인 시도');
+        const response = await fetchFromAPI('user_login', {
+          google_id: userData.id,
+          email: userData.email
+        });
+        console.log('🔍 로그인: 서버 응답', response);
 
-      //  if (response.user) {
-      //    // Save to local storage
-      //    console.log('🔍 로그인: 로컬 스토리지에 사용자 정보 저장');
-      //    await AsyncStorage.setItem('@user', JSON.stringify(userData));
-      //    setUser(userData);
-      //    toast.show('로그인 되었습니다.', 'success');
-      //  } else {
-      //    console.log('🚨 오류: 서버 응답에 사용자 정보 없음');
-      //    throw new Error('서버에 사용자 정보를 저장하는데 실패했습니다.');
-      //  }
-      //} catch (error) {
-      //  console.error('🚨 오류: 서버 로그인 오류:', error);
-      //  console.log('🔍 로그인: 구글 로그아웃 시도');
-      //  toast.show('서버 통신 중 오류가 발생했습니다.', 'error');
-      //  // Sign out from Google as server login failed
-      //  await GoogleSignin.signOut();
-      //}
+        if (response.user) {
+          // Save to local storage
+          console.log('🔍 로그인: 로컬 스토리지에 사용자 정보 저장');
+          await AsyncStorage.setItem('@user', JSON.stringify(userData));
+          setUser(userData);
+          toast.show('로그인 되었습니다.', 'success');
+        } else {
+          console.log('🚨 오류: 서버 응답에 사용자 정보 없음');
+          throw new Error('서버에 사용자 정보를 저장하는데 실패했습니다.');
+        }
+      } catch (error) {
+        console.error('🚨 오류: 서버 로그인 오류:', error);
+        console.log('🔍 로그인: 구글 로그아웃 시도');
+        toast.show('서버 통신 중 오류가 발생했습니다.', 'error');
+        // Sign out from Google as server login failed
+        await GoogleSignin.signOut();
+      }
     } catch (error: any) {
       if (error.code === statusCodes.SIGN_IN_CANCELLED) {
         // user cancelled the login flow
