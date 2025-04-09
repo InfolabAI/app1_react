@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, createContext, useContext, useMemo } from 'react';
 import {
   View, ScrollView, Share, FlatList, TouchableOpacity, StyleSheet, Image,
-  Clipboard, RefreshControl, Animated, Linking
+  Clipboard, RefreshControl, Animated, Linking, Alert
 } from 'react-native';
 import {
   NavigationContainer, DarkTheme as NavDarkTheme, useNavigation,
@@ -20,12 +20,32 @@ import axios from 'axios';
 import cheerio from 'react-native-cheerio';
 import { generateAndSharePDF } from './utils/pdfGenerator';
 import mobileAds, { BannerAd, BannerAdSize, TestIds } from 'react-native-google-mobile-ads';
+import '@react-native-google-signin/google-signin';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Import directly from the CommonJS exports
+const { GoogleSignin, GoogleSigninButton, statusCodes } = require('@react-native-google-signin/google-signin');
 
 // Type definitions
 type AppContextType = {
   refreshFunction: (() => void) | null;
   setRefreshFunction: React.Dispatch<React.SetStateAction<(() => void) | null>>;
   triggerRefresh: () => void;
+};
+
+// Auth context type definition
+type UserInfo = {
+  id: string;
+  email: string;
+  name?: string;
+  photo?: string;
+};
+
+type AuthContextType = {
+  user: UserInfo | null;
+  isLoading: boolean;
+  signIn: () => Promise<void>;
+  signOut: () => Promise<void>;
 };
 
 type ToastContextType = { show: (message: string, type?: string) => void; };
@@ -36,6 +56,7 @@ type Review = { date: string; score: number; content: string; username: string; 
 
 // Navigation types
 type RootStackParamList = {
+  Login: undefined;
   Home: undefined;
   AppList: {
     refreshTrigger?: number;
@@ -52,6 +73,7 @@ type RootStackParamList = {
 // Context creation
 const AppContext = createContext<AppContextType | null>(null);
 const ToastContext = createContext<ToastContextType | null>(null);
+const AuthContext = createContext<AuthContextType | null>(null);
 const DEBUG = false;
 const log = (...args: any[]): void => { if (DEBUG) console.log('[DEBUG]', ...args); };
 
@@ -64,6 +86,23 @@ mobileAds()
   .catch((error: any) => {
     console.error('Mobile Ads initialization error:', error);
   });
+
+// Initialize Google Sign-In
+// Google Sign-In 설정 수정
+GoogleSignin.configure({
+  // Android 디바이스를 위한 웹 클라이언트 ID 설정
+  webClientId: '7253862100-0db3qgjubmp5anp878rd5a8t1v8jtaf1.apps.googleusercontent.com',
+  // iOS 디바이스를 위한 iOS 클라이언트 ID (필요한 경우)
+  // iosClientId: 'YOUR_IOS_CLIENT_ID.apps.googleusercontent.com',
+  offlineAccess: true,
+  forceCodeForRefreshToken: true, // 인증 코드 강제 새로고침
+  //accountName: '', // 특정 계정으로 자동 선택 (선택 사항)
+  //scopes: ['profile', 'email'],
+  // 구글 Play 서비스 사용 불가 시 에러 핸들링 방식 설정
+  //hostedDomain: '', // 특정 도메인으로 제한 (선택 사항)
+  // 개발 모드에서 Google 웹 로그인 사용 (선택 사항)
+  //uxMode: 'POPUP', // REDIRECT 또는 POPUP
+});
 
 // Use test ad unit ID in development, replace with actual ID in production
 const adUnitId = __DEV__ ? TestIds.BANNER : 'ca-app-pub-7838208657677503/6303324511'; // TestIds.BANNER 라는 구글에서 제공하는 test ID 를 사용하다가 실제 앱 배포시에는 실제 앱의 광고단위 아이디를 사용.
@@ -166,37 +205,263 @@ const useToast = (): ToastContextType => {
   return context;
 };
 
+// Auth provider with enhanced debugging
+const AuthProvider: React.FC<ToastProviderProps> = ({ children }) => {
+  const [user, setUser] = useState<UserInfo | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const toast = useToast();
+
+  // Check if user is already logged in
+  useEffect(() => {
+    const checkUser = async () => {
+      try {
+        setIsLoading(true);
+        console.log('🔍 체크: 이전 로그인 상태 확인 시작');
+        // Check for cached user
+        const userString = await AsyncStorage.getItem('@user');
+        if (userString) {
+          console.log('🔍 체크: 캐시된 사용자 정보 발견');
+          const userData = JSON.parse(userString);
+          setUser(userData);
+
+          // Verify with the server
+          try {
+            console.log('🔍 체크: 서버 검증 시도');
+            const response = await fetchFromAPI('user_info', {
+              google_id: userData.id
+            });
+            console.log('🔍 체크: 서버 응답', response);
+            if (!response.user) {
+              console.log('🔍 체크: 서버에 사용자 정보가 없음');
+              // User not found on server, clear local storage
+              await AsyncStorage.removeItem('@user');
+              setUser(null);
+            }
+          } catch (error) {
+            console.error('🚨 오류: 서버 검증 실패:', error);
+            // Keep the user signed in even if server validation fails
+          }
+        } else {
+          console.log('🔍 체크: 캐시된 사용자 정보 없음');
+        }
+      } catch (error) {
+        console.error('🚨 오류: 로그인 상태 확인 오류:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    checkUser();
+  }, []);
+
+  const signIn = async () => {
+    try {
+      setIsLoading(true);
+      console.log('🔍 로그인: Google Play 서비스 확인 시작');
+      await GoogleSignin.hasPlayServices({
+        // 서비스 사용 불가 시 설치/업데이트 다이얼로그 표시
+        showPlayServicesUpdateDialog: true
+      });
+
+      console.log('🔍 로그인: Google 로그인 시도');
+      const userInfo = await GoogleSignin.signIn();
+      console.log('🔍 로그인: Google 로그인 성공', userInfo.user.email);
+
+      // userInfo is correctly typed by the library
+      const userData: UserInfo = {
+        id: userInfo.user.id,
+        email: userInfo.user.email,
+        name: userInfo.user.name,
+        photo: userInfo.user.photo || undefined
+      };
+
+      // Save to server
+      try {
+        console.log('🔍 로그인: 서버 로그인 시도');
+        const response = await fetchFromAPI('user_login', {
+          google_id: userData.id,
+          email: userData.email
+        });
+        console.log('🔍 로그인: 서버 응답', response);
+
+        if (response.user) {
+          // Save to local storage
+          console.log('🔍 로그인: 로컬 스토리지에 사용자 정보 저장');
+          await AsyncStorage.setItem('@user', JSON.stringify(userData));
+          setUser(userData);
+          toast.show('로그인 되었습니다.', 'success');
+        } else {
+          console.log('🚨 오류: 서버 응답에 사용자 정보 없음');
+          throw new Error('서버에 사용자 정보를 저장하는데 실패했습니다.');
+        }
+      } catch (error) {
+        console.error('🚨 오류: 서버 로그인 오류:', error);
+        console.log('🔍 로그인: 구글 로그아웃 시도');
+        toast.show('서버 통신 중 오류가 발생했습니다.', 'error');
+        // Sign out from Google as server login failed
+        await GoogleSignin.signOut();
+      }
+    } catch (error: any) {
+      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+        // user cancelled the login flow
+        console.log('🔍 로그인: 사용자가 로그인 취소');
+        toast.show('로그인이 취소되었습니다.', 'info');
+      } else if (error.code === statusCodes.IN_PROGRESS) {
+        console.log('🔍 로그인: 이미 로그인 진행 중');
+        toast.show('이미 로그인 진행 중입니다.', 'info');
+      } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        console.log('🚨 오류: Google Play 서비스 사용 불가');
+        toast.show('Google Play 서비스를 사용할 수 없습니다.', 'error');
+      } else {
+        console.error('🚨 오류: 로그인 오류:', error);
+        toast.show('로그인 중 오류가 발생했습니다.', 'error');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const signOut = async () => {
+    try {
+      setIsLoading(true);
+      console.log('🔍 로그아웃: Google 로그아웃 시도');
+      await GoogleSignin.signOut();
+      console.log('🔍 로그아웃: 로컬 스토리지 삭제');
+      await AsyncStorage.removeItem('@user');
+      setUser(null);
+      toast.show('로그아웃 되었습니다.', 'success');
+    } catch (error) {
+      console.error('🚨 오류: 로그아웃 오류:', error);
+      toast.show('로그아웃 중 오류가 발생했습니다.', 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, isLoading, signIn, signOut }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+// Auth hook
+const useAuth = (): AuthContextType => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
+
 // API functions
 const fetchFromAPI = async (requestType: string, params = {}) => {
-  const response = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ request_type: requestType, ...params }),
-  });
+  console.log(`🔍 API 요청: ${requestType}`, params);
 
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status}`);
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request_type: requestType, ...params }),
+    });
+
+    console.log(`🔍 API 응답 상태: ${response.status}`);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`🚨 API 오류 (${response.status}):`, errorText);
+      throw new Error(`API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    console.log(`🔍 API 응답 데이터:`, data);
+    return data;
+  } catch (error) {
+    console.error(`🚨 API 요청 실패 (${requestType}):`, error);
+    // 원본 오류를 그대로 던져서 상위에서 처리할 수 있게 함
+    throw error;
   }
-
-  return await response.json();
 };
+
+/**
+ * 0) LoginScreen
+ */
+function LoginScreen({ navigation }: { navigation: NavigationProp<RootStackParamList, 'Login'> }): React.ReactElement {
+  const { signIn, isLoading } = useAuth();
+
+  return (
+    <Surface style={styles.loginContainer}>
+      <PaperText variant="headlineMedium" style={styles.appTitle}>
+        앱 리뷰 분석기
+      </PaperText>
+
+      <Image
+        source={require('./assets/app-placeholder.png')}
+        style={styles.appLogo}
+      />
+
+      <PaperText style={styles.loginText}>
+        구글 계정으로 로그인하여 앱 리뷰 분석 서비스를 이용하세요.
+      </PaperText>
+
+      {isLoading ? (
+        <ActivityIndicator size="large" color="#6200ee" style={{ marginTop: 20 }} />
+      ) : (
+        <GoogleSigninButton
+          style={{ width: 220, height: 60, marginTop: 20 }}
+          size={GoogleSigninButton.Size.Wide}
+          color={GoogleSigninButton.Color.Dark}
+          onPress={signIn}
+        />
+      )}
+    </Surface>
+  );
+}
 
 /** 
  * 1) HomeScreen 
  */
 function HomeScreen({ navigation }: { navigation: NavigationProp<RootStackParamList, 'Home'> }): React.ReactElement {
+  const { user } = useAuth();
+
   return (
     <Surface style={styles.homeContainer}>
+      <View style={styles.userInfoContainer}>
+        {user?.photo && (
+          <Image
+            source={{ uri: user.photo }}
+            style={styles.profileImage}
+          />
+        )}
+        <PaperText variant="titleMedium" style={styles.welcomeText}>
+          {user?.name ? `환영합니다, ${user.name}님!` : '환영합니다!'}
+        </PaperText>
+        <PaperText style={styles.emailText}>{user?.email}</PaperText>
+      </View>
+
       <PaperText variant="titleLarge" style={{ marginBottom: 20 }}>
-        메인 화면
+        앱 리뷰 분석기
       </PaperText>
-      <PaperButton
-        mode="contained"
-        onPress={() => navigation.navigate('AppList' as never)}
-        style={{ width: "90%" }}
-      >
-        리뷰 로딩
-      </PaperButton>
+
+      <View style={styles.homeButtonContainer}>
+        <PaperButton
+          mode="contained"
+          onPress={() => navigation.navigate('AppList', {})}
+          icon="apps"
+          style={styles.navigationButton}
+        >
+          앱 목록 보기
+        </PaperButton>
+
+        <PaperButton
+          mode="contained"
+          onPress={() => navigation.navigate('Help')}
+          icon="plus"
+          style={styles.navigationButton}
+        >
+          새 앱 추가하기
+        </PaperButton>
+      </View>
     </Surface>
   );
 }
@@ -1132,6 +1397,8 @@ export default function App(): React.ReactElement {
     prefixes: ['appreviewanalyzer://', 'https://play.google.com'],
     config: {
       screens: {
+        Login: 'login',
+        Home: 'home',
         Help: 'help',
         AppList: 'apps',
         Review: 'review/:appId',
@@ -1153,23 +1420,81 @@ export default function App(): React.ReactElement {
 
   return (
     <ToastProvider>
-      <AppContext.Provider value={appContextValue}>
-        <PaperProvider theme={CombinedDarkTheme}>
-          <NavigationContainer theme={CombinedDarkTheme as any} linking={linking as any} ref={navigationRef}>
-            <View style={{ flex: 1 }}>
-              <Stack.Navigator initialRouteName="Home">
-                <Stack.Screen name="Home" component={HomeScreen} options={{ title: '메인화면' }} />
-                <Stack.Screen name="AppList" component={AppListScreen} options={{ title: '앱 목록' }} />
-                <Stack.Screen name="Help" component={HelpScreen} options={{ title: '앱 추가' }} />
-                <Stack.Screen name="Review" component={ReviewScreen} options={{ title: '앱 리뷰' }} />
-                <Stack.Screen name="AISummary" component={AISummaryScreen} options={{ title: 'AI 요약' }} />
-              </Stack.Navigator>
-              <AdBanner />
-            </View>
-          </NavigationContainer>
-        </PaperProvider>
-      </AppContext.Provider>
+      <AuthProvider>
+        <AppContext.Provider value={appContextValue}>
+          <PaperProvider theme={CombinedDarkTheme}>
+            <NavigationContainer theme={CombinedDarkTheme as any} linking={linking as any} ref={navigationRef}>
+              <View style={{ flex: 1 }}>
+                <AuthNavigator />
+                <AdBanner />
+              </View>
+            </NavigationContainer>
+          </PaperProvider>
+        </AppContext.Provider>
+      </AuthProvider>
     </ToastProvider>
+  );
+}
+
+// Auth navigator that handles authentication flow
+function AuthNavigator() {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#6200ee" />
+        <PaperText style={{ marginTop: 16 }}>로딩 중...</PaperText>
+      </View>
+    );
+  }
+
+  return (
+    <Stack.Navigator initialRouteName={user ? "Home" : "Login"} screenOptions={{ headerRight: HeaderRightMenu }}>
+      {!user ? (
+        <Stack.Screen
+          name="Login"
+          component={LoginScreen}
+          options={{
+            title: '로그인',
+            headerShown: false
+          }}
+        />
+      ) : (
+        <>
+          <Stack.Screen name="Home" component={HomeScreen} options={{ title: '메인화면' }} />
+          <Stack.Screen name="AppList" component={AppListScreen} options={{ title: '앱 목록' }} />
+          <Stack.Screen name="Help" component={HelpScreen} options={{ title: '앱 추가' }} />
+          <Stack.Screen name="Review" component={ReviewScreen} options={{ title: '앱 리뷰' }} />
+          <Stack.Screen name="AISummary" component={AISummaryScreen} options={{ title: 'AI 요약' }} />
+        </>
+      )}
+    </Stack.Navigator>
+  );
+}
+
+// Header right menu with logout option
+function HeaderRightMenu() {
+  const { signOut } = useAuth();
+  const [menuVisible, setMenuVisible] = useState(false);
+
+  return (
+    <Menu
+      visible={menuVisible}
+      onDismiss={() => setMenuVisible(false)}
+      anchor={
+        <IconButton icon="dots-vertical" onPress={() => setMenuVisible(true)} />
+      }
+    >
+      <Menu.Item
+        onPress={() => {
+          setMenuVisible(false);
+          signOut();
+        }}
+        title="로그아웃"
+        leadingIcon="logout"
+      />
+    </Menu>
   );
 }
 
@@ -1205,6 +1530,8 @@ const styles = StyleSheet.create({
   refreshIconButton: { margin: 0, backgroundColor: '#6200ee' },
   retryButton: { marginTop: 16 },
   clearSearchButton: { marginTop: 16 },
+  actionButton: { marginVertical: 5, width: '100%' },
+  actionButtonContent: { height: 48 },
 
   // Search styles
   searchContainer: { marginBottom: 8, paddingHorizontal: 12 },
@@ -1249,8 +1576,6 @@ const styles = StyleSheet.create({
 
   // AI Summary styles
   buttonContainer: { marginBottom: 10, paddingHorizontal: 12 },
-  actionButton: { marginVertical: 5, width: '100%' },
-  actionButtonContent: { height: 48 },
   markdownContainer: {
     flex: 1, backgroundColor: '#1E1E1E', padding: 16,
     borderRadius: 8, elevation: 2
@@ -1277,5 +1602,61 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#121212',
     padding: 5
-  }
+  },
+
+  // Login screen styles
+  loginContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: '#121212'
+  },
+  appTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    color: '#fff'
+  },
+  appLogo: {
+    width: 100,
+    height: 100,
+    marginBottom: 20
+  },
+  loginText: {
+    fontSize: 16,
+    color: '#aaa',
+    marginBottom: 20,
+    textAlign: 'center'
+  },
+
+  // Home screen styles
+  userInfoContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  profileImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    marginBottom: 10,
+  },
+  welcomeText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  emailText: {
+    fontSize: 14,
+    color: '#aaa',
+  },
+  homeButtonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 12,
+  },
+  navigationButton: {
+    flex: 1,
+    margin: 4,
+  },
 });
