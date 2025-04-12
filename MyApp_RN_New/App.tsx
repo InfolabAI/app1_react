@@ -13,7 +13,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import {
   Provider as PaperProvider, Text as PaperText, TextInput as PaperTextInput,
   Button as PaperButton, MD3DarkTheme as PaperDarkTheme, ActivityIndicator,
-  Menu, IconButton, Surface
+  Menu, IconButton, Surface, Avatar, Appbar, Dialog, Portal, Divider
 } from 'react-native-paper';
 import Markdown from 'react-native-markdown-display';
 import axios from 'axios';
@@ -57,7 +57,6 @@ type Review = { date: string; score: number; content: string; username: string; 
 // Navigation types
 type RootStackParamList = {
   Login: undefined;
-  Home: undefined;
   AppList: {
     refreshTrigger?: number;
     extractedPackageId?: string;
@@ -431,54 +430,6 @@ function LoginScreen({ navigation }: { navigation: NavigationProp<RootStackParam
 }
 
 /** 
- * 1) HomeScreen 
- */
-function HomeScreen({ navigation }: { navigation: NavigationProp<RootStackParamList, 'Home'> }): React.ReactElement {
-  const { user } = useAuth();
-
-  return (
-    <Surface style={styles.homeContainer}>
-      <View style={styles.userInfoContainer}>
-        {user?.photo && (
-          <Image
-            source={{ uri: user.photo }}
-            style={styles.profileImage}
-          />
-        )}
-        <PaperText variant="titleMedium" style={styles.welcomeText}>
-          {user?.name ? `환영합니다, ${user.name}님!` : '환영합니다!'}
-        </PaperText>
-        <PaperText style={styles.emailText}>{user?.email}</PaperText>
-      </View>
-
-      <PaperText variant="titleLarge" style={{ marginBottom: 20 }}>
-        앱 리뷰 분석기
-      </PaperText>
-
-      <View style={styles.homeButtonContainer}>
-        <PaperButton
-          mode="contained"
-          onPress={() => navigation.navigate('AppList', {})}
-          icon="apps"
-          style={styles.navigationButton}
-        >
-          앱 목록 보기
-        </PaperButton>
-
-        <PaperButton
-          mode="contained"
-          onPress={() => navigation.navigate('Help')}
-          icon="plus"
-          style={styles.navigationButton}
-        >
-          새 앱 추가하기
-        </PaperButton>
-      </View>
-    </Surface>
-  );
-}
-
-/** 
  * 2) AppListScreen 
  */
 function AppListScreen({ navigation, route }: {
@@ -487,6 +438,7 @@ function AppListScreen({ navigation, route }: {
 }): React.ReactElement {
   const appContext = useContext(AppContext);
   const toast = useToast();
+  const { user, signOut } = useAuth();
   const [appList, setAppList] = useState<AppItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -494,6 +446,8 @@ function AppListScreen({ navigation, route }: {
   const [initialLoadDone, setInitialLoadDone] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [filteredAppList, setFilteredAppList] = useState<AppItem[]>([]);
+  const [settingsMenuVisible, setSettingsMenuVisible] = useState<boolean>(false);
+  const [logoutConfirmVisible, setLogoutConfirmVisible] = useState<boolean>(false);
 
   const isRefreshingRef = useRef<boolean>(false);
   const lastRefreshTimeRef = useRef<number>(0);
@@ -675,6 +629,19 @@ function AppListScreen({ navigation, route }: {
 
   const handleClearSearch = () => setSearchQuery('');
 
+  const handleShowSettings = () => setSettingsMenuVisible(true);
+  const handleHideSettings = () => setSettingsMenuVisible(false);
+
+  const handleLogoutPress = () => {
+    setSettingsMenuVisible(false);
+    setLogoutConfirmVisible(true);
+  };
+
+  const handleConfirmLogout = async () => {
+    setLogoutConfirmVisible(false);
+    await signOut();
+  };
+
   const renderItem = ({ item }: { item: AppItem }) => (
     <View style={styles.itemRowContainer}>
       <Image
@@ -747,6 +714,30 @@ function AppListScreen({ navigation, route }: {
 
   return (
     <View style={styles.container}>
+      {/* User Profile Section */}
+      <View style={styles.userProfileContainer}>
+        <View style={styles.userInfoRow}>
+          <View style={styles.userInfoContent}>
+            {user?.photo ? (
+              <Avatar.Image size={32} source={{ uri: user.photo }} style={styles.userAvatar} />
+            ) : (
+              <Avatar.Icon size={32} icon="account" style={styles.userAvatar} />
+            )}
+            <PaperText style={styles.userNameText}>
+              {user?.name || '사용자'}님 환영합니다
+            </PaperText>
+          </View>
+          <IconButton
+            icon="cog"
+            mode="contained"
+            size={20}
+            onPress={handleShowSettings}
+            style={styles.settingsButton}
+          />
+        </View>
+        <Divider style={styles.userDivider} />
+      </View>
+
       <View style={styles.searchContainer}>
         <PaperTextInput
           label="앱 이름 또는 ID로 검색"
@@ -802,6 +793,34 @@ function AppListScreen({ navigation, route }: {
           />
         }
       />
+
+      {/* Settings Menu */}
+      <Menu
+        visible={settingsMenuVisible}
+        onDismiss={handleHideSettings}
+        anchor={{ x: 0, y: 0 }}
+        style={styles.settingsMenu}
+      >
+        <Menu.Item
+          leadingIcon="logout"
+          onPress={handleLogoutPress}
+          title="로그아웃"
+        />
+      </Menu>
+
+      {/* Logout Confirmation Dialog */}
+      <Portal>
+        <Dialog visible={logoutConfirmVisible} onDismiss={() => setLogoutConfirmVisible(false)}>
+          <Dialog.Title>로그아웃</Dialog.Title>
+          <Dialog.Content>
+            <PaperText>정말 로그아웃 하시겠습니까?</PaperText>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <PaperButton onPress={() => setLogoutConfirmVisible(false)}>취소</PaperButton>
+            <PaperButton onPress={handleConfirmLogout}>로그아웃</PaperButton>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
     </View>
   );
 }
@@ -1410,9 +1429,8 @@ export default function App(): React.ReactElement {
     config: {
       screens: {
         Login: 'login',
-        Home: 'home',
-        Help: 'help',
         AppList: 'apps',
+        Help: 'help',
         Review: 'review/:appId',
         AISummary: 'summary/:appId',
       },
@@ -1462,7 +1480,7 @@ function AuthNavigator() {
   }
 
   return (
-    <Stack.Navigator initialRouteName={user ? "Home" : "Login"} screenOptions={{ headerRight: HeaderRightMenu }}>
+    <Stack.Navigator initialRouteName={user ? "AppList" : "Login"}>
       {!user ? (
         <Stack.Screen
           name="Login"
@@ -1474,7 +1492,6 @@ function AuthNavigator() {
         />
       ) : (
         <>
-          <Stack.Screen name="Home" component={HomeScreen} options={{ title: '메인화면' }} />
           <Stack.Screen name="AppList" component={AppListScreen} options={{ title: '앱 목록' }} />
           <Stack.Screen name="Help" component={HelpScreen} options={{ title: '앱 추가' }} />
           <Stack.Screen name="Review" component={ReviewScreen} options={{ title: '앱 리뷰' }} />
@@ -1485,36 +1502,10 @@ function AuthNavigator() {
   );
 }
 
-// Header right menu with logout option
-function HeaderRightMenu() {
-  const { signOut } = useAuth();
-  const [menuVisible, setMenuVisible] = useState(false);
-
-  return (
-    <Menu
-      visible={menuVisible}
-      onDismiss={() => setMenuVisible(false)}
-      anchor={
-        <IconButton icon="dots-vertical" onPress={() => setMenuVisible(true)} />
-      }
-    >
-      <Menu.Item
-        onPress={() => {
-          setMenuVisible(false);
-          signOut();
-        }}
-        title="로그아웃"
-        leadingIcon="logout"
-      />
-    </Menu>
-  );
-}
-
 // 스타일 정의
 const styles = StyleSheet.create({
   // Common container styles
   container: { flex: 1, padding: 12, backgroundColor: '#121212' },
-  homeContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212' },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
 
@@ -1534,6 +1525,46 @@ const styles = StyleSheet.create({
   appIcon: { width: 50, height: 50, borderRadius: 10, marginRight: 12, backgroundColor: '#2C2C2C' },
   appName: { fontSize: 16, fontWeight: 'bold', color: '#fff' },
   appId: { fontSize: 12, color: '#aaa', marginTop: 2 },
+
+  // User profile styles
+  userProfileContainer: {
+    marginBottom: 12,
+    backgroundColor: '#1E1E1E',
+    borderRadius: 8,
+    padding: 12,
+  },
+  userInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4
+  },
+  userInfoContent: {
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  userAvatar: {
+    marginRight: 8
+  },
+  userNameText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold'
+  },
+  settingsButton: {
+    margin: 0,
+    backgroundColor: '#333'
+  },
+  userDivider: {
+    backgroundColor: '#333',
+    height: 1,
+    marginTop: 8
+  },
+  settingsMenu: {
+    position: 'absolute',
+    top: 50,
+    right: 16
+  },
 
   // Button styles
   addButtonContainer: { marginBottom: 16, paddingHorizontal: 12 },
@@ -1640,35 +1671,5 @@ const styles = StyleSheet.create({
     color: '#aaa',
     marginBottom: 20,
     textAlign: 'center'
-  },
-
-  // Home screen styles
-  userInfoContainer: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  profileImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    marginBottom: 10,
-  },
-  welcomeText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  emailText: {
-    fontSize: 14,
-    color: '#aaa',
-  },
-  homeButtonContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    padding: 12,
-  },
-  navigationButton: {
-    flex: 1,
-    margin: 4,
   },
 });

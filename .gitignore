@@ -1,3 +1,5 @@
+*.zip
+
 # Expo 프로젝트 폴더
 MyApp/android
 MyApp/ios
@@ -19,6 +21,12 @@ AmazonLambda_crawlF/*
 !AmazonLambda_crawlF/*.yml
 !AmazonLambda_crawlF/*.json
 !AmazonLambda_crawlF/*.sh
+
+# React Native 의 android 폴더 내 중요 파일은 다시 트래킹(build.gradle, app/build.gradle, androidManifest.xml, MainActivity.kt, MyApplication.kt 등)
+!MyApp_RN_New/android/build.gradle
+!MyApp_RN_New/android/app/build.gradle
+!MyApp_RN_New/android/app/src/main/AndroidManifest.xml
+
 
 # build_transfer.sh 파일은 다시 무시
 AmazonLambda_crawlF/build_transfer.sh
