@@ -1,13 +1,3 @@
-import {
-  CartesianChart,
-  PolarChart,
-  Line,
-  Area,
-  Bar,
-  BarGroup,
-  Pie,
-  useChartPressState,
-} from 'victory-native';
 // App.tsx
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, createContext, useContext, useMemo } from 'react';
 import {
