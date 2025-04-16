@@ -1,3 +1,13 @@
+import {
+  CartesianChart,
+  PolarChart,
+  Line,
+  Area,
+  Bar,
+  BarGroup,
+  Pie,
+  useChartPressState,
+} from 'victory-native';
 // App.tsx
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, createContext, useContext, useMemo } from 'react';
 import {
@@ -22,6 +32,18 @@ import { generateAndSharePDF } from './utils/pdfGenerator';
 import mobileAds, { BannerAd, BannerAdSize, TestIds } from 'react-native-google-mobile-ads';
 import '@react-native-google-signin/google-signin';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+// [수정된 부분] victory-native 관련된 임포트는 전부 삭제했습니다.
+// import { VictoryChart, VictoryTheme, ... } from 'victory-native';
+// import Svg from 'react-native-svg'; // 이 부분도 사용 안 하므로 제거
+
+// [수정된 부분] 새로 만든 FileA.tsx에서 필요한 함수와 타입들을 가져옵니다.
+import {
+  generateChartData,
+  AISummaryCharts,
+  ReviewData,
+  ChartData,
+  TimeUnit,
+} from './ReviewProcessing';
 
 // Import directly from the CommonJS exports
 const { GoogleSignin, GoogleSigninButton, statusCodes } = require('@react-native-google-signin/google-signin');
@@ -87,24 +109,12 @@ mobileAds()
   });
 
 // Initialize Google Sign-In
-// Google Sign-In 설정 수정
 GoogleSignin.configure({
-  // Android 디바이스를 위한 웹 클라이언트 ID 설정
   webClientId: '7253862100-gt5oklb7ikkhogn81kvsibdv45n9nb83.apps.googleusercontent.com',
-  // iOS 디바이스를 위한 iOS 클라이언트 ID (필요한 경우)
-  // iosClientId: 'YOUR_IOS_CLIENT_ID.apps.googleusercontent.com',
   offlineAccess: true,
-  //forceCodeForRefreshToken: true, // 인증 코드 강제 새로고침
-  //accountName: '', // 특정 계정으로 자동 선택 (선택 사항)
-  //scopes: ['profile', 'email'],
-  // 구글 Play 서비스 사용 불가 시 에러 핸들링 방식 설정
-  //hostedDomain: '', // 특정 도메인으로 제한 (선택 사항)
-  // 개발 모드에서 Google 웹 로그인 사용 (선택 사항)
-  //uxMode: 'POPUP', // REDIRECT 또는 POPUP
-}); //
+});
 
-// Use test ad unit ID in development, replace with actual ID in production
-const adUnitId = __DEV__ ? TestIds.BANNER : 'ca-app-pub-7838208657677503/6303324511'; // TestIds.BANNER 라는 구글에서 제공하는 test ID 를 사용하다가 실제 앱 배포시에는 실제 앱의 광고단위 아이디를 사용.
+const adUnitId = __DEV__ ? TestIds.BANNER : 'ca-app-pub-7838208657677503/6303324511';
 
 // Theme configuration
 const CombinedDarkTheme = {
@@ -204,26 +214,25 @@ const useToast = (): ToastContextType => {
   return context;
 };
 
-// Auth provider with enhanced debugging
+// Auth provider
 const AuthProvider: React.FC<ToastProviderProps> = ({ children }) => {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const toast = useToast();
 
-  // Check if user is already logged in
   useEffect(() => {
     const checkUser = async () => {
       try {
         setIsLoading(true);
         console.log('🔍 체크: 이전 로그인 상태 확인 시작');
-        // Check for cached user
+
         const userString = await AsyncStorage.getItem('@user');
         if (userString) {
           console.log('🔍 체크: 캐시된 사용자 정보 발견');
           const userData = JSON.parse(userString);
           setUser(userData);
 
-          // Verify with the server
+          // 서버 검증
           try {
             console.log('🔍 체크: 서버 검증 시도');
             const response = await fetchFromAPI('user_info', {
@@ -232,13 +241,11 @@ const AuthProvider: React.FC<ToastProviderProps> = ({ children }) => {
             console.log('🔍 체크: 서버 응답', response);
             if (!response.user) {
               console.log('🔍 체크: 서버에 사용자 정보가 없음');
-              // User not found on server, clear local storage
               await AsyncStorage.removeItem('@user');
               setUser(null);
             }
           } catch (error) {
             console.error('🚨 오류: 서버 검증 실패:', error);
-            // Keep the user signed in even if server validation fails
           }
         } else {
           console.log('🔍 체크: 캐시된 사용자 정보 없음');
@@ -258,7 +265,6 @@ const AuthProvider: React.FC<ToastProviderProps> = ({ children }) => {
       setIsLoading(true);
       console.log('🔍 로그인: Google Play 서비스 확인 시작');
       await GoogleSignin.hasPlayServices({
-        // 서비스 사용 불가 시 설치/업데이트 다이얼로그 표시
         showPlayServicesUpdateDialog: true
       });
 
@@ -266,9 +272,7 @@ const AuthProvider: React.FC<ToastProviderProps> = ({ children }) => {
       const userInfo = await GoogleSignin.signIn();
       console.log('🔍 로그인: Google 로그인 성공');
       console.log('유저 정보', userInfo);
-      console.log('유저 정보 중 user 정보', userInfo.data.user);
 
-      // userInfo is correctly typed by the library
       const userData: UserInfo = {
         id: userInfo.data.user.id,
         email: userInfo.data.user.email,
@@ -276,37 +280,24 @@ const AuthProvider: React.FC<ToastProviderProps> = ({ children }) => {
         photo: userInfo.data.user.photo || undefined
       };
 
-      //setUser(userData);
+      // 서버 로그인
+      console.log('🔍 로그인: 서버 로그인 시도');
+      const response = await fetchFromAPI('user_login', {
+        google_id: userData.id,
+        email: userData.email
+      });
+      console.log('🔍 로그인: 서버 응답', response);
 
-      // Save to server
-      try {
-        console.log('🔍 로그인: 서버 로그인 시도');
-        const response = await fetchFromAPI('user_login', {
-          google_id: userData.id,
-          email: userData.email
-        });
-        console.log('🔍 로그인: 서버 응답', response);
-
-        if (response.user) {
-          // Save to local storage
-          console.log('🔍 로그인: 로컬 스토리지에 사용자 정보 저장');
-          await AsyncStorage.setItem('@user', JSON.stringify(userData));
-          setUser(userData);
-          toast.show('로그인 되었습니다.', 'success');
-        } else {
-          console.log('🚨 오류: 서버 응답에 사용자 정보 없음');
-          throw new Error('서버에 사용자 정보를 저장하는데 실패했습니다.');
-        }
-      } catch (error) {
-        console.error('🚨 오류: 서버 로그인 오류:', error);
-        console.log('🔍 로그인: 구글 로그아웃 시도');
-        toast.show('서버 통신 중 오류가 발생했습니다.', 'error');
-        // Sign out from Google as server login failed
-        await GoogleSignin.signOut();
+      if (response.user) {
+        await AsyncStorage.setItem('@user', JSON.stringify(userData));
+        setUser(userData);
+        toast.show('로그인 되었습니다.', 'success');
+      } else {
+        console.log('🚨 오류: 서버 응답에 사용자 정보 없음');
+        throw new Error('서버에 사용자 정보를 저장하는데 실패했습니다.');
       }
     } catch (error: any) {
       if (error.code === statusCodes.SIGN_IN_CANCELLED) {
-        // user cancelled the login flow
         console.log('🔍 로그인: 사용자가 로그인 취소');
         toast.show('로그인이 취소되었습니다.', 'info');
       } else if (error.code === statusCodes.IN_PROGRESS) {
@@ -362,7 +353,6 @@ const fetchFromAPI = async (requestType: string, params = {}) => {
   console.log(`🔍 API 요청: ${requestType}`, params);
 
   try {
-    // Ensure request_type is properly included in the request body
     const requestBody = {
       request_type: requestType,
       ...params
@@ -389,7 +379,6 @@ const fetchFromAPI = async (requestType: string, params = {}) => {
     return data;
   } catch (error) {
     console.error(`🚨 API 요청 실패 (${requestType}):`, error);
-    // 원본 오류를 그대로 던져서 상위에서 처리할 수 있게 함
     throw error;
   }
 };
@@ -880,7 +869,6 @@ function HelpScreen({ navigation }: {
       if (!match) {
         match = playStoreLink.match(/apps\/details\/?id=([^&\s]+)/);
       }
-
       if (!match && playStoreLink.includes('.')) {
         match = ['', playStoreLink.trim()];
       }
@@ -941,7 +929,6 @@ function HelpScreen({ navigation }: {
         return;
       }
       throw new Error(result.message || '앱 정보 등록에 실패했습니다.');
-
     } catch (error: any) {
       console.error('앱 정보 가져오기 오류:', error);
       let errorMessage = "앱 정보를 가져오는 중 오류가 발생했습니다.";
@@ -969,7 +956,6 @@ function HelpScreen({ navigation }: {
   useEffect(() => {
     const validateAndProcessLink = async () => {
       if (!playStoreLink) return;
-
       try {
         let match = playStoreLink.match(/[?&]id=([^&]+)/);
         if (!match) match = playStoreLink.match(/apps\/details\/?id=([^&\s]+)/);
@@ -1092,10 +1078,14 @@ function ReviewScreen({ route }: {
       if (data && data.reviews && Array.isArray(data.reviews)) {
         const formattedReviews = data.reviews.map((review: any) => ({
           date: new Date(review.date).toLocaleDateString(),
+          rawDate: new Date(review.date),
           score: review.score,
           content: review.content,
           username: review.username || '익명'
         }));
+
+        // 최신순 정렬
+        formattedReviews.sort((a: any, b: any) => b.rawDate.getTime() - a.rawDate.getTime());
 
         setReviews(formattedReviews);
 
@@ -1189,8 +1179,16 @@ function AISummaryScreen({ route, navigation }: {
   const toast = useToast();
   const { appId, appName } = route.params;
   const [summary, setSummary] = useState<string>('');
+  const [summaryLoading, setSummaryLoading] = useState<boolean>(false);
+  const [summaryVisible, setSummaryVisible] = useState<boolean>(false);
+  const [reviews, setReviews] = useState<ReviewData[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<boolean>(false);
+
+  // [수정된 부분] chartData는 FileA의 ChartData 타입 사용
+  const [chartData, setChartData] = useState<ChartData | null>(null);
+  const [timeUnit, setTimeUnit] = useState<TimeUnit>('week');
+
   const [menuVisible, setMenuVisible] = useState<boolean>(false);
   const [downloadingPDF, setDownloadingPDF] = useState<boolean>(false);
   const scrollViewRef = useRef<ScrollView>(null);
@@ -1220,38 +1218,40 @@ function AISummaryScreen({ route, navigation }: {
     });
   }, [navigation, menuVisible, summary]);
 
+  // 리뷰 불러오기
   useEffect(() => {
     let isMounted = true;
 
-    const fetchSummary = async () => {
+    const fetchReviewData = async () => {
       try {
         setLoading(true);
-        const data = await fetchFromAPI('summary', { app_id: appId });
+        const data = await fetchFromAPI('app_review_read', { app_id: appId });
 
         if (!isMounted) return;
+        if (data && data.reviews && Array.isArray(data.reviews)) {
+          const formattedReviews: ReviewData[] = data.reviews.map((review: any) => ({
+            date: new Date(review.date).toLocaleDateString(),
+            rawDate: new Date(review.date),
+            score: review.score,
+            content: review.content,
+            username: review.username || '익명',
+          }));
 
-        if (data.success && data.summary) {
-          setSummary(data.summary);
+          // 최신순 정렬
+          formattedReviews.sort((a, b) => b.rawDate.getTime() - a.rawDate.getTime());
+          setReviews(formattedReviews);
 
-          if (data.date_range && isMounted) {
-            setTimeout(() => {
-              if (isMounted) {
-                toast.show(`${data.date_range} 기간의 리뷰가 요약되었습니다.`, "success");
-              }
-            }, 100);
-          }
+          // [수정된 부분] Victory 로직 대신 FileA의 generateChartData를 사용
+          const generated = generateChartData(formattedReviews, timeUnit);
+          setChartData(generated);
         } else {
-          throw new Error(data.error || '요약 생성에 실패했습니다.');
+          throw new Error('리뷰 데이터 형식이 올바르지 않습니다.');
         }
       } catch (err: any) {
-        console.error(err);
+        console.error('리뷰 데이터 가져오기 오류:', err);
         if (isMounted) {
           setError(true);
-          setTimeout(() => {
-            if (isMounted) {
-              toast.show(err.message, "error");
-            }
-          }, 100);
+          toast.show('리뷰 데이터를 가져오는 중 오류가 발생했습니다.', 'error');
         }
       } finally {
         if (isMounted) {
@@ -1260,9 +1260,41 @@ function AISummaryScreen({ route, navigation }: {
       }
     };
 
-    fetchSummary();
+    fetchReviewData();
     return () => { isMounted = false; };
-  }, [appId]);
+  }, [appId, timeUnit]); // [수정된 부분] timeUnit이 바뀔 때마다 새로 계산
+
+  // timeUnit이 변경될 때마다 차트 데이터 재생성
+  useEffect(() => {
+    if (reviews.length > 0) {
+      const generated = generateChartData(reviews, timeUnit);
+      setChartData(generated);
+    }
+  }, [timeUnit, reviews]);
+
+  // AI 요약 불러오기
+  const fetchSummary = async () => {
+    try {
+      setSummaryLoading(true);
+      const data = await fetchFromAPI('summary', { app_id: appId });
+
+      if (data.success && data.summary) {
+        setSummary(data.summary);
+        setSummaryVisible(true);
+
+        if (data.date_range) {
+          toast.show(`${data.date_range} 기간의 리뷰가 요약되었습니다.`, "success");
+        }
+      } else {
+        throw new Error(data.error || '요약 생성에 실패했습니다.');
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast.show(err.message, "error");
+    } finally {
+      setSummaryLoading(false);
+    }
+  };
 
   const downloadAsPDF = async () => {
     try {
@@ -1292,7 +1324,7 @@ function AISummaryScreen({ route, navigation }: {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <PaperText style={{ marginBottom: 8 }}>AI 요약 생성 중...</PaperText>
+        <PaperText style={{ marginBottom: 8 }}>데이터 분석 중...</PaperText>
         <ActivityIndicator animating />
       </View>
     );
@@ -1302,75 +1334,124 @@ function AISummaryScreen({ route, navigation }: {
     return (
       <View style={styles.container}>
         <PaperText variant="titleLarge" style={{ textAlign: 'center', margin: 20 }}>
-          요약을 불러오는 중 오류가 발생했습니다
+          데이터를 불러오는 중 오류가 발생했습니다
         </PaperText>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      ref={scrollViewRef}
+      contentContainerStyle={styles.scrollContentContainer}
+    >
       <PaperText variant="titleLarge" style={{ textAlign: 'center', margin: 20 }}>
-        {appName} 리뷰 AI 요약
+        {appName} 리뷰 데이터 분석
       </PaperText>
 
-      <View style={styles.buttonContainer}>
-        <PaperButton
-          mode="contained"
-          onPress={downloadAsPDF}
-          icon="file-pdf-box"
-          style={styles.actionButton}
-          contentStyle={styles.actionButtonContent}
-          loading={downloadingPDF}
-          disabled={downloadingPDF}
-        >
-          PDF 저장
-        </PaperButton>
-
-        <PaperButton
-          mode="contained"
-          onPress={shareContent}
-          icon="share-variant"
-          style={styles.actionButton}
-          contentStyle={styles.actionButtonContent}
-        >
-          공유하기
-        </PaperButton>
+      {/* 시간 단위 선택 */}
+      <View style={styles.timeUnitSelector}>
+        <PaperText style={styles.sectionTitle}>시간 단위 선택:</PaperText>
+        <View style={styles.timeUnitButtons}>
+          <PaperButton
+            mode={timeUnit === 'day' ? 'contained' : 'outlined'}
+            onPress={() => setTimeUnit('day')}
+            style={styles.timeUnitButton}
+          >
+            일별
+          </PaperButton>
+          <PaperButton
+            mode={timeUnit === 'week' ? 'contained' : 'outlined'}
+            onPress={() => setTimeUnit('week')}
+            style={styles.timeUnitButton}
+          >
+            주별
+          </PaperButton>
+          <PaperButton
+            mode={timeUnit === 'month' ? 'contained' : 'outlined'}
+            onPress={() => setTimeUnit('month')}
+            style={styles.timeUnitButton}
+          >
+            월별
+          </PaperButton>
+        </View>
       </View>
 
-      <ScrollView
-        style={styles.scrollContainer}
-        ref={scrollViewRef}
-        contentContainerStyle={styles.scrollContentContainer}
-      >
-        <TouchableOpacity activeOpacity={1} onLongPress={shareContent}>
-          <View style={styles.markdownContainer}>
-            <Markdown
-              style={{
-                body: { color: '#ffffff' },
-                heading1: { color: '#ffffff' },
-                heading2: { color: '#ffffff' },
-                heading3: { color: '#ffffff' },
-                heading4: { color: '#ffffff' },
-                heading5: { color: '#ffffff' },
-                heading6: { color: '#ffffff' },
-                strong: { color: '#ffffff' },
-                em: { color: '#ffffff' },
-                blockquote: { color: '#ffffff' },
-                bullet_list: { color: '#ffffff' },
-                ordered_list: { color: '#ffffff' },
-                list_item: { color: '#ffffff' },
-                paragraph: { color: '#ffffff', fontSize: 16, lineHeight: 24 },
-                link: { color: '#3498db' },
-                code_block: { backgroundColor: '#2c3e50', color: '#ffffff' },
-                code_inline: { backgroundColor: '#2c3e50', color: '#ffffff' },
-              }}
-            >
-              {summary}
-            </Markdown>
-          </View>
-        </TouchableOpacity>
-      </ScrollView>
+      {/* [수정된 부분] Victory 차트 대신 FileA에서 만든 AISummaryCharts 컴포넌트로 대체 */}
+      {chartData && (
+        <AISummaryCharts chartData={chartData} />
+      )}
+
+      {/* 텍스트 요약 버튼 / 내용 */}
+      <View style={styles.summarySection}>
+        {!summaryVisible ? (
+          <PaperButton
+            mode="contained"
+            onPress={fetchSummary}
+            loading={summaryLoading}
+            disabled={summaryLoading}
+            icon="text-box-outline"
+            style={styles.summaryButton}
+          >
+            텍스트 요약 생성하기
+          </PaperButton>
+        ) : (
+          <>
+            <View style={styles.buttonContainer}>
+              <PaperButton
+                mode="contained"
+                onPress={downloadAsPDF}
+                icon="file-pdf-box"
+                style={styles.actionButton}
+                contentStyle={styles.actionButtonContent}
+                loading={downloadingPDF}
+                disabled={downloadingPDF}
+              >
+                PDF 저장
+              </PaperButton>
+
+              <PaperButton
+                mode="contained"
+                onPress={shareContent}
+                icon="share-variant"
+                style={styles.actionButton}
+                contentStyle={styles.actionButtonContent}
+              >
+                공유하기
+              </PaperButton>
+            </View>
+
+            <TouchableOpacity activeOpacity={1} onLongPress={shareContent}>
+              <View style={styles.markdownContainer}>
+                <Markdown
+                  style={{
+                    body: { color: '#ffffff' },
+                    heading1: { color: '#ffffff' },
+                    heading2: { color: '#ffffff' },
+                    heading3: { color: '#ffffff' },
+                    heading4: { color: '#ffffff' },
+                    heading5: { color: '#ffffff' },
+                    heading6: { color: '#ffffff' },
+                    strong: { color: '#ffffff' },
+                    em: { color: '#ffffff' },
+                    blockquote: { color: '#ffffff' },
+                    bullet_list: { color: '#ffffff' },
+                    ordered_list: { color: '#ffffff' },
+                    list_item: { color: '#ffffff' },
+                    paragraph: { color: '#ffffff', fontSize: 16, lineHeight: 24 },
+                    link: { color: '#3498db' },
+                    code_block: { backgroundColor: '#2c3e50', color: '#ffffff' },
+                    code_inline: { backgroundColor: '#2c3e50', color: '#ffffff' },
+                  }}
+                >
+                  {summary}
+                </Markdown>
+              </View>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
 
       {downloadingPDF && (
         <View style={styles.overlay}>
@@ -1380,7 +1461,7 @@ function AISummaryScreen({ route, navigation }: {
           </PaperText>
         </View>
       )}
-    </View>
+    </ScrollView>
   );
 }
 
@@ -1466,7 +1547,7 @@ export default function App(): React.ReactElement {
   );
 }
 
-// Auth navigator that handles authentication flow
+// Auth navigator
 function AuthNavigator() {
   const { user, isLoading } = useAuth();
 
@@ -1495,6 +1576,7 @@ function AuthNavigator() {
           <Stack.Screen name="AppList" component={AppListScreen} options={{ title: '앱 목록' }} />
           <Stack.Screen name="Help" component={HelpScreen} options={{ title: '앱 추가' }} />
           <Stack.Screen name="Review" component={ReviewScreen} options={{ title: '앱 리뷰' }} />
+          {/* [수정된 부분] AISummaryScreen은 이제 Victory 코드가 빠졌음 */}
           <Stack.Screen name="AISummary" component={AISummaryScreen} options={{ title: 'AI 요약' }} />
         </>
       )}
@@ -1671,5 +1753,27 @@ const styles = StyleSheet.create({
     color: '#aaa',
     marginBottom: 20,
     textAlign: 'center'
+  },
+
+  // Chart selector styles
+  timeUnitSelector: {
+    marginBottom: 16,
+    backgroundColor: '#1E1E1E',
+    borderRadius: 8,
+    padding: 16,
+  },
+  timeUnitButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  timeUnitButton: {
+    flex: 1,
+    marginHorizontal: 4,
+  },
+  summarySection: {
+    marginTop: 16,
+    marginBottom: 24,
+    padding: 16,
   },
 });

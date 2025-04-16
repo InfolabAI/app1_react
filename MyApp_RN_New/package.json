@@ -14,6 +14,7 @@
     "@react-native-google-signin/google-signin": "^13.2.0",
     "@react-navigation/native": "^7.1.0",
     "@react-navigation/native-stack": "^7.2.1",
+    "@shopify/react-native-skia": "^1.12.4",
     "axios": "^1.8.4",
     "expo": "~52.0.38",
     "expo-dev-client": "~5.0.15",
@@ -28,13 +29,17 @@
     "react": "19.0.0",
     "react-native": "0.78.2",
     "react-native-cheerio": "^1.0.0-rc.4",
+    "react-native-gesture-handler": "^2.25.0",
     "react-native-google-mobile-ads": "14.2.0",
     "react-native-html-to-pdf": "^0.12.0",
     "react-native-markdown-display": "^7.0.2",
     "react-native-paper": "^5.13.1",
+    "react-native-reanimated": "^3.17.4",
     "react-native-safe-area-context": "5.3.0",
     "react-native-screens": "^4.10.0",
-    "react-native-vector-icons": "^10.2.0"
+    "react-native-svg": "^15.11.2",
+    "react-native-vector-icons": "^10.2.0",
+    "victory-native": "^41.16.2"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
