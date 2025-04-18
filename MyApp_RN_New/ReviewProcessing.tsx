@@ -6,105 +6,81 @@ import {
     StackedBarChart
 } from 'react-native-chart-kit';
 
-/** 리뷰 데이터 형식 */
+/* ──────────────────── 타입 ──────────────────── */
 export type ReviewData = {
-    date: string;   // YYYY-MM-DD 등 표시용
-    rawDate: Date;  // 실제 날짜 객체
-    score: number;  // 별점(문자열 가능성이 있어 Number() 변환 필요)
+    date: string;            // 표시용(“YYYY‑MM‑DD” 등)
+    rawDate: Date;           // 실제 Date 객체
+    score: number | string;  // 별점
     content: string;
     username: string;
 };
 
-/** 차트에 사용할 데이터 구조 */
 export type ChartData = {
     reviews: ReviewData[];
     timeRatings: Array<{ x: string; y: number }>;
     ratingDistribution: Array<{ x: number; y: number }>;
-    keywordTrends: { [key: string]: Array<{ x: string; y: number }> };
+    keywordTrends: { [k: string]: Array<{ x: string; y: number }> };
     bugReports: Array<{ x: string; y: number }>;
     reviewLengthVsRating: Array<{ x: number; y: number; size: number }>;
     reviewVolume: Array<{ x: string; y: number }>;
 };
 
-/** 시간 단위 타입 정의 */
 export type TimeUnit = 'day' | 'week' | 'month';
 
-/** 내부 유틸: 리뷰를 시간 단위별로 그룹화 */
+/* ──────────────────── 날짜 유틸 ──────────────────── */
+const ymd = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+        d.getDate()
+    ).padStart(2, '0')}`;
+
+const mondayOfWeek = (d: Date) => {
+    const day = d.getDay();               // 0(일)‑6(토)
+    const offset = day === 0 ? 6 : day - 1;
+    const m = new Date(d);
+    m.setDate(m.getDate() - offset);
+    m.setHours(0, 0, 0, 0);               // 타임존 보정
+    return ymd(m);
+};
+
+/* ──────────────────── 그룹핑 ──────────────────── */
 function groupByTimeUnit(reviews: ReviewData[], unit: TimeUnit) {
-    const grouped: { [key: string]: ReviewData[] } = {};
+    const grouped: { [k: string]: ReviewData[] } = {};
 
-    if (!reviews || reviews.length === 0) {
-        return grouped;
-    }
+    reviews.forEach((r) => {
+        if (!(r.rawDate instanceof Date)) return;
+        let key = '';
 
-    reviews.forEach((review) => {
-        if (!review.rawDate || !(review.rawDate instanceof Date)) {
-            console.warn('Invalid date found in review data');
-            return;
+        if (unit === 'day') {
+            key = ymd(r.rawDate);
+        } else if (unit === 'week') {
+            key = mondayOfWeek(r.rawDate);      // 월요일 날짜 하나로 대표
+        } else if (unit === 'month') {
+            key = `${r.rawDate.getFullYear()}-${String(r.rawDate.getMonth() + 1).padStart(2, '0')}`;
         }
 
-        const date = review.rawDate;
-        let timeKey = '';
-
-        try {
-            if (unit === 'day') {
-                // ex: "2025-04-16"
-                timeKey = date.toISOString().split('T')[0];
-            } else if (unit === 'week') {
-                // "월요일 기준"으로 주를 묶는 예시
-                const day = date.getDay(); // 0=일,1=월,2=화, ...
-                // 월요일=1 기준으로, 오늘이 day라면 "day-1" 일을 빼면 해당 주 월요일
-                // 일요일(0)인 경우 -1이 되므로, 보정이 필요
-                const offset = (day === 0) ? 6 : (day - 1); // 일요일이면 6일 빼서 저번주 월요일
-                const monday = new Date(date);
-                monday.setDate(monday.getDate() - offset);
-                timeKey = monday.toISOString().split('T')[0];
-            } else if (unit === 'month') {
-                // ex: "2025-04"
-                timeKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-            }
-
-            if (!timeKey) {
-                console.warn('Empty timeKey generated');
-                return;
-            }
-
-            if (!grouped[timeKey]) {
-                grouped[timeKey] = [];
-            }
-            grouped[timeKey].push(review);
-        } catch (error) {
-            console.error('Error processing date:', error);
-        }
+        if (!grouped[key]) grouped[key] = [];
+        grouped[key].push(r);
     });
 
     return grouped;
 }
 
-/** 내부 유틸: 리뷰에서 관심 키워드를 추출 */
-function extractKeywords(text: string): string[] {
-    const commonKeywords = [
+/* ──────────────────── 키워드 유틸 ──────────────────── */
+function extractKeywords(text: string) {
+    const kws = [
         '버그', '빠름', '느림', '디자인', '충돌', '멈춤',
         '좋아요', '편리', '불편', '업데이트', '기능', '오류'
     ];
-    return commonKeywords.filter((keyword) =>
-        text.toLowerCase().includes(keyword.toLowerCase())
-    );
+    return kws.filter(k => text.toLowerCase().includes(k.toLowerCase()));
 }
 
-/** 내부 유틸: 버그/이슈 관련 키워드 포함 여부 */
-function mentionsBugs(text: string): boolean {
-    const bugKeywords = ['버그', '충돌', '멈춤', '오류', '에러', '문제'];
-    return bugKeywords.some((keyword) =>
-        text.toLowerCase().includes(keyword.toLowerCase())
-    );
+function mentionsBugs(text: string) {
+    const bug = ['버그', '충돌', '멈춤', '오류', '에러', '문제'];
+    return bug.some(k => text.toLowerCase().includes(k.toLowerCase()));
 }
 
-/**
- * 리뷰 데이터를 받아 차트용(ChartData)으로 변환
- */
+/* ──────────────────── 데이터 변환 ──────────────────── */
 export function generateChartData(reviewData: ReviewData[], timeUnit: TimeUnit): ChartData {
-    // 빈 데이터 체크
     if (!reviewData || reviewData.length === 0) {
         return {
             reviews: [],
@@ -119,153 +95,73 @@ export function generateChartData(reviewData: ReviewData[], timeUnit: TimeUnit):
 
     const grouped = groupByTimeUnit(reviewData, timeUnit);
 
-    // 1) 평점 추이 (Line)
-    const timeRatings = Object.entries(grouped)
-        .map(([timeKey, group]) => {
-            let sum = 0;
-            group.forEach(r => {
-                const sc = Number(r.score);
-                sum += isNaN(sc) ? 0 : sc;
-            });
-            const avg = sum / (group.length || 1);
-            const safeAvg = isNaN(avg) ? 0 : avg;
-
-            // 표시용 라벨
-            let display = timeKey;
-            if (timeUnit === 'day') {
-                // ex: "2025-04-16" -> "04-16"
-                const parts = timeKey.split('-');
-                if (parts.length === 3) {
-                    display = `${parts[1]}-${parts[2]}`;
-                }
-            } else if (timeUnit === 'week') {
-                // ex: "2025-04-15" -> 그 주 "04-15" (월요일)
-                const d = new Date(timeKey);
-                const mm = String(d.getMonth() + 1).padStart(2, '0');
-                const dd = String(d.getDate()).padStart(2, '0');
-                display = `${mm}-${dd}`;
-            } else if (timeUnit === 'month') {
-                // ex: "2025-04" -> "04"
-                const parts = timeKey.split('-');
-                if (parts.length === 2) {
-                    display = parts[1];
-                }
-            }
-
-            return {
-                original: timeKey,
-                x: display,
-                y: parseFloat(safeAvg.toFixed(2))
-            };
-        })
-        .sort((a, b) => a.original.localeCompare(b.original))
+    /* 1) 평점 추이 */
+    const timeRatings = Object.entries(grouped).map(([k, g]) => {
+        const avg = g.reduce((s, r) => s + Number(r.score || 0), 0) / g.length;
+        let label = k;
+        if (timeUnit === 'day') label = k.slice(5);               // “MM‑DD”
+        else if (timeUnit === 'week') label = k.slice(5);         // 주 시작 “MM‑DD”
+        else if (timeUnit === 'month') label = k.split('-')[1];   // “MM”
+        return { original: k, x: label, y: +avg.toFixed(2) };
+    }).sort((a, b) => a.original.localeCompare(b.original))
         .map(({ x, y }) => ({ x, y }));
 
-    // 2) 평점 분포 (Bar)
+    /* 2) 평점 분포 */
     const ratingCounts = [0, 0, 0, 0, 0];
     reviewData.forEach(r => {
-        const score = Number(r.score);
-        if (score >= 1 && score <= 5) {
-            ratingCounts[score - 1]++;
-        }
+        const s = Number(r.score);
+        if (s >= 1 && s <= 5) ratingCounts[s - 1]++;
     });
-    const ratingDistribution = ratingCounts.map((count, i) => ({
-        x: i + 1,
-        y: count
-    }));
+    const ratingDistribution = ratingCounts.map((c, i) => ({ x: i + 1, y: c }));
 
-    // 3) 키워드 트렌드
-    const keywordMap: { [k: string]: { [t: string]: number } } = {};
-    Object.entries(grouped).forEach(([timeKey, group]) => {
-        group.forEach(r => {
-            const kws = extractKeywords(r.content);
-            kws.forEach(kw => {
-                if (!keywordMap[kw]) keywordMap[kw] = {};
-                if (!keywordMap[kw][timeKey]) keywordMap[kw][timeKey] = 0;
-                keywordMap[kw][timeKey]++;
+    /* 3) 키워드 트렌드 */
+    const kwMap: { [k: string]: { [t: string]: number } } = {};
+    Object.entries(grouped).forEach(([k, g]) => {
+        g.forEach(r => {
+            extractKeywords(r.content).forEach(kw => {
+                if (!kwMap[kw]) kwMap[kw] = {};
+                if (!kwMap[kw][k]) kwMap[kw][k] = 0;
+                kwMap[kw][k]++;
             });
         });
     });
     const keywordTrends: { [k: string]: Array<{ x: string; y: number }> } = {};
-    Object.entries(keywordMap).forEach(([kw, timeObj]) => {
-        const arr = Object.entries(timeObj)
-            .map(([timeKey, cnt]) => {
-                let display = timeKey;
-                if (timeUnit === 'day') {
-                    const parts = timeKey.split('-');
-                    if (parts.length === 3) display = `${parts[1]}-${parts[2]}`;
-                } else if (timeUnit === 'week') {
-                    const d = new Date(timeKey);
-                    const mm = String(d.getMonth() + 1).padStart(2, '0');
-                    const dd = String(d.getDate()).padStart(2, '0');
-                    display = `${mm}-${dd}`;
-                } else if (timeUnit === 'month') {
-                    const parts = timeKey.split('-');
-                    if (parts.length === 2) display = parts[1];
-                }
-                return { original: timeKey, x: display, y: cnt };
-            })
-            .sort((a, b) => a.original.localeCompare(b.original))
+    Object.entries(kwMap).forEach(([kw, tm]) => {
+        keywordTrends[kw] = Object.entries(tm).map(([k, c]) => {
+            let label = k;
+            if (timeUnit === 'day') label = k.slice(5);
+            else if (timeUnit === 'week') label = k.slice(5);
+            else if (timeUnit === 'month') label = k.split('-')[1];
+            return { original: k, x: label, y: c };
+        }).sort((a, b) => a.original.localeCompare(b.original))
             .map(({ x, y }) => ({ x, y }));
-
-        keywordTrends[kw] = arr;
     });
 
-    // 4) 버그 보고 횟수 (Bar)
-    const bugReports = Object.entries(grouped)
-        .map(([timeKey, group]) => {
-            let bugCount = 0;
-            group.forEach(r => {
-                if (mentionsBugs(r.content)) bugCount++;
-            });
-            let display = timeKey;
-            if (timeUnit === 'day') {
-                const parts = timeKey.split('-');
-                if (parts.length === 3) display = `${parts[1]}-${parts[2]}`;
-            } else if (timeUnit === 'week') {
-                const d = new Date(timeKey);
-                const mm = String(d.getMonth() + 1).padStart(2, '0');
-                const dd = String(d.getDate()).padStart(2, '0');
-                display = `${mm}-${dd}`;
-            } else if (timeUnit === 'month') {
-                const parts = timeKey.split('-');
-                if (parts.length === 2) display = parts[1];
-            }
-            return { original: timeKey, x: display, y: bugCount };
-        })
-        .sort((a, b) => a.original.localeCompare(b.original))
+    /* 4) 버그 보고 */
+    const bugReports = Object.entries(grouped).map(([k, g]) => {
+        const bugCnt = g.filter(r => mentionsBugs(r.content)).length;
+        let label = k;
+        if (timeUnit === 'day') label = k.slice(5);
+        else if (timeUnit === 'week') label = k.slice(5);
+        else if (timeUnit === 'month') label = k.split('-')[1];
+        return { original: k, x: label, y: bugCnt };
+    }).sort((a, b) => a.original.localeCompare(b.original))
         .map(({ x, y }) => ({ x, y }));
 
-    // 5) 리뷰 길이 vs 평점
+    /* 5) 리뷰 길이 vs 평점 */
     const reviewLengthVsRating = reviewData.map(r => {
         const s = Number(r.score);
-        const len = r.content.length;
-        return {
-            x: len,
-            y: isNaN(s) ? 0 : s,
-            size: 3
-        };
+        return { x: r.content.length, y: isNaN(s) ? 0 : s, size: 3 };
     });
 
-    // 6) 리뷰 볼륨
-    const reviewVolume = Object.entries(grouped)
-        .map(([timeKey, group]) => {
-            let display = timeKey;
-            if (timeUnit === 'day') {
-                const parts = timeKey.split('-');
-                if (parts.length === 3) display = `${parts[1]}-${parts[2]}`;
-            } else if (timeUnit === 'week') {
-                const d = new Date(timeKey);
-                const mm = String(d.getMonth() + 1).padStart(2, '0');
-                const dd = String(d.getDate()).padStart(2, '0');
-                display = `${mm}-${dd}`;
-            } else if (timeUnit === 'month') {
-                const parts = timeKey.split('-');
-                if (parts.length === 2) display = parts[1];
-            }
-            return { original: timeKey, x: display, y: group.length };
-        })
-        .sort((a, b) => a.original.localeCompare(b.original))
+    /* 6) 리뷰 볼륨 */
+    const reviewVolume = Object.entries(grouped).map(([k, g]) => {
+        let label = k;
+        if (timeUnit === 'day') label = k.slice(5);
+        else if (timeUnit === 'week') label = k.slice(5);
+        else if (timeUnit === 'month') label = k.split('-')[1];
+        return { original: k, x: label, y: g.length };
+    }).sort((a, b) => a.original.localeCompare(b.original))
         .map(({ x, y }) => ({ x, y }));
 
     return {
@@ -279,31 +175,22 @@ export function generateChartData(reviewData: ReviewData[], timeUnit: TimeUnit):
     };
 }
 
-/** 차트 컨테이너 */
-const ChartContainer: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => {
-    return (
-        <View style={styles.chartCard}>
-            <Text style={styles.chartTitle}>{title}</Text>
-            <View style={styles.chartContent}>{children}</View>
-        </View>
-    );
-};
-
-/** 차트 공통 설정 */
+/* ──────────────────── 공통 차트 설정 ──────────────────── */
 const chartConfig = {
     backgroundColor: '#2A2A2A',
     backgroundGradientFrom: '#2A2A2A',
     backgroundGradientTo: '#2A2A2A',
     decimalPlaces: 0,
-    color: (opacity = 1) => `rgba(255,255,255,${opacity})`,
-    labelColor: (opacity = 1) => `rgba(255,255,255,${opacity})`,
-    style: {
-        borderRadius: 16,
-    }
+    barPercentage: 0.7,  // (0 ~ 1) 기본 1 → 폭을 70 %
+    color: (o = 1) => `rgba(255,255,255,${o})`,
+    labelColor: (o = 1) => `rgba(255,255,255,${o})`,
+    style: { borderRadius: 16 }
 };
+/* 평점추이만 소수점 1자리 */
+const ratingChartConfig = { ...chartConfig, decimalPlaces: 1 };
 
-/** 키워드별 색상(필요시) */
-const keywordColors: { [kw: string]: string } = {
+/* 키워드색 */
+const keywordColors: { [k: string]: string } = {
     '버그': 'rgba(255, 99, 132, 1)',
     '충돌': 'rgba(255, 159, 64, 1)',
     '멈춤': 'rgba(255, 205, 86, 1)',
@@ -320,16 +207,20 @@ const keywordColors: { [kw: string]: string } = {
     '기능': 'rgba(142, 68, 173, 1)'
 };
 
-/**
- * AISummaryCharts
- */
+/* ──────────────────── 뷰 래퍼 ──────────────────── */
+const ChartContainer: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
+    <View style={styles.chartCard}>
+        <Text style={styles.chartTitle}>{title}</Text>
+        <View style={styles.chartContent}>{children}</View>
+    </View>
+);
+
+/* ──────────────────── 메인 컴포넌트 ──────────────────── */
 export const AISummaryCharts: React.FC<{ chartData: ChartData }> = ({ chartData }) => {
     const { width } = Dimensions.get('window');
-    // 좌우 잘림 최소화를 위해 조금 줄인 폭 사용
     const chartWidth = Math.floor(width * 0.9);
-    const hasData = chartData && chartData.timeRatings && chartData.timeRatings.length > 0;
 
-    if (!hasData) {
+    if (!chartData?.timeRatings?.length) {
         return (
             <ScrollView style={{ marginBottom: 16 }}>
                 <View style={styles.chartCard}>
@@ -339,63 +230,39 @@ export const AISummaryCharts: React.FC<{ chartData: ChartData }> = ({ chartData 
         );
     }
 
-    // -----------------------------------
-    // 1) 평점 추이 (Line) - 최대 6개
-    // -----------------------------------
+    /* 1) 평점 추이 */
     const timeRatingsSlice = chartData.timeRatings.slice(-6);
     const timeRatingData = {
         labels: timeRatingsSlice.map(v => v.x),
-        datasets: [
-            {
-                data: timeRatingsSlice.map(v => v.y),
-                color: (opacity = 1) => `rgba(255,99,132,${opacity})`,
-                strokeWidth: 2
-            }
-        ]
+        datasets: [{ data: timeRatingsSlice.map(v => v.y), color: (o = 1) => `rgba(255,99,132,${o})`, strokeWidth: 2 }]
     };
+    console.log('[평점추이] 예:', timeRatingsSlice.slice(0, 3));
 
-    // formatXLabel: 라이브러리가 (기본 3~4개 이상) 추가 라벨을 그릴 때 빈 문자열로
-    const formatXLabel = (label: string) => {
-        // 원래 라벨 반환
-        return label;
-    };
-
-    // -----------------------------------
-    // 2) 평점 분포 (Bar)
-    // -----------------------------------
+    /* 2) 평점 분포 */
     const ratingDistData = {
         labels: ['1점', '2점', '3점', '4점', '5점'],
-        datasets: [
-            { data: chartData.ratingDistribution.map(r => r.y) }
-        ]
+        datasets: [{ data: chartData.ratingDistribution.map(r => r.y) }]
     };
+    console.log('[평점분포] 예:', ratingDistData.datasets[0].data.slice(0, 3));
 
-    // -----------------------------------
-    // 3) 키워드 트렌드
-    // -----------------------------------
+    /* 3) 키워드 트렌드 */
     const keywordTrendCharts: React.ReactElement[] = [];
-    const allKeywords = Object.keys(chartData.keywordTrends);
-    allKeywords.forEach(kw => {
+    Object.keys(chartData.keywordTrends).forEach(kw => {
         const arr = chartData.keywordTrends[kw];
-        if (!arr || arr.length === 0) return;
-        // 최근 6개만
+        if (!arr?.length) return;
         const sliced = arr.slice(-6);
         const data = {
             labels: sliced.map(v => v.x),
-            datasets: [
-                {
-                    data: sliced.map(v => v.y),
-                    color: (opacity = 1) => {
-                        const base = keywordColors[kw] || 'rgba(0,150,136,1)';
-                        return base.replace(',1)', `,${opacity})`);
-                    },
-                    strokeWidth: 2
-                }
-            ]
+            datasets: [{
+                data: sliced.map(v => v.y),
+                color: (o = 1) => {
+                    const base = keywordColors[kw] || 'rgba(0,150,136,1)';
+                    return base.replace(',1)', `,${o})`);
+                },
+                strokeWidth: 2
+            }]
         };
-
-        const formatKwLabel = (label: string) => label;
-
+        console.log(`[키워드:${kw}] 예:`, sliced.slice(0, 3));
         keywordTrendCharts.push(
             <ChartContainer key={kw} title={`키워드 트렌드: ${kw}`}>
                 <LineChart
@@ -405,97 +272,66 @@ export const AISummaryCharts: React.FC<{ chartData: ChartData }> = ({ chartData 
                     chartConfig={chartConfig}
                     bezier
                     style={styles.chart}
-                    formatXLabel={formatKwLabel}
                 />
             </ChartContainer>
         );
     });
 
-    // -----------------------------------
-    // 4) 버그 보고 횟수 (Bar) - 최대 5개
-    // -----------------------------------
+    /* 4) 버그 보고 */
     const bugSlice = chartData.bugReports.slice(-5);
     const bugReportData = {
         labels: bugSlice.map(v => v.x),
-        datasets: [
-            {
-                data: bugSlice.map(v => v.y),
-                color: (opacity = 1) => `rgba(255,165,0,${opacity})`
-            }
-        ]
+        datasets: [{ data: bugSlice.map(v => v.y), color: (o = 1) => `rgba(255,165,0,${o})` }]
     };
-    const formatBugLabel = (label: string) => label;
+    console.log('[버그리포트] 예:', bugSlice.slice(0, 3));
 
-    // -----------------------------------
-    // 5) 리뷰 길이 vs 평점 -> StackedBar
-    // (바 위의 텍스트 제거, 평점 레전드는 아래쪽)
-    // -----------------------------------
+    /* 5) 리뷰 길이 vs 평점 (스택 바) */
     const bins = [0, 100, 300, Infinity];
-    const labels = ['0-100', '101-300', '301+'];
-    const counters: { [rating: number]: number[] } = { 1: [0, 0, 0], 2: [0, 0, 0], 3: [0, 0, 0], 4: [0, 0, 0], 5: [0, 0, 0] };
-
-    chartData.reviewLengthVsRating.forEach(item => {
-        const r = Math.floor(item.y);
+    const labels = ['0‑100', '101‑300', '301+'];
+    const cnt: { [r: number]: number[] } = { 1: [0, 0, 0], 2: [0, 0, 0], 3: [0, 0, 0], 4: [0, 0, 0], 5: [0, 0, 0] };
+    chartData.reviewLengthVsRating.forEach(({ x, y }) => {
+        const r = Math.floor(y);
         if (r < 1 || r > 5) return;
         for (let i = 0; i < bins.length - 1; i++) {
-            if (item.x >= bins[i] && item.x < bins[i + 1]) {
-                counters[r][i]++;
-                break;
-            }
+            if (x >= bins[i] && x < bins[i + 1]) { cnt[r][i]++; break; }
         }
     });
-
-    // 스택형 바차트에서 data는 "X축 항목 하나마다 [스택1,스택2,스택3, ...]" 형태여야 함
-    // 여기선 X축(3개 구간)마다 5개 평점을 쌓음 → 각 구간 i에 대해 [1점,2점,3점,4점,5점] 순서
-    // 값은 0~1 사이 비율
     const stackedDataArr = labels.map((_, i) => {
-        const sum = [1, 2, 3, 4, 5].reduce((acc, r) => acc + counters[r][i], 0);
-        if (sum === 0) {
-            return [0, 0, 0, 0, 0];
-        } else {
-            return [1, 2, 3, 4, 5].map(r => counters[r][i] / sum);
-        }
+        const sum = [1, 2, 3, 4, 5].reduce((a, r) => a + cnt[r][i], 0);
+        return sum === 0 ? [0, 0, 0, 0, 0] : [1, 2, 3, 4, 5].map(r => cnt[r][i] / sum);
     });
-
     const stackedData = {
-        labels: labels,
-        legend: ['1점', '2점', '3점', '4점', '5점'], // 아래 레전드
+        labels,
+        legend: ['1점', '2점', '3점', '4점', '5점'],
         data: stackedDataArr,
         barColors: ['#FF5252', '#FF9800', '#FFEB3B', '#4CAF50', '#2196F3']
     };
+    console.log('[리뷰길이‑평점] 스택데이터 예:', stackedDataArr);
 
-    // -----------------------------------
-    // 6) 리뷰 볼륨 (Line) - 최대 6개
-    // -----------------------------------
+    /* 6) 리뷰 볼륨 */
     const volSlice = chartData.reviewVolume.slice(-6);
     const volData = {
         labels: volSlice.map(v => v.x),
-        datasets: [
-            {
-                data: volSlice.map(v => v.y),
-                color: (opacity = 1) => `rgba(0,210,255,${opacity})`,
-                strokeWidth: 2
-            }
-        ]
+        datasets: [{ data: volSlice.map(v => v.y), color: (o = 1) => `rgba(0,210,255,${o})`, strokeWidth: 2 }]
     };
-    const formatVolLabel = (label: string) => label;
+    console.log('[리뷰볼륨] 예:', volSlice.slice(0, 3));
 
+    /* ──────────────────── 반환 뷰 ──────────────────── */
     return (
         <ScrollView style={{ marginBottom: 16 }}>
-            {/* 차트1: 평점 추이 */}
+            {/* 1 평점추이 */}
             <ChartContainer title="평점 추이">
                 <LineChart
                     data={timeRatingData}
                     width={chartWidth}
                     height={220}
-                    chartConfig={chartConfig}
+                    chartConfig={ratingChartConfig}   /* 소수점 1자리 */
                     bezier
                     style={styles.chart}
-                    formatXLabel={formatXLabel}
                 />
             </ChartContainer>
 
-            {/* 차트2: 평점 분포 */}
+            {/* 2 평점 분포 */}
             <ChartContainer title="평점 분포">
                 <BarChart
                     data={ratingDistData}
@@ -504,14 +340,14 @@ export const AISummaryCharts: React.FC<{ chartData: ChartData }> = ({ chartData 
                     chartConfig={chartConfig}
                     style={styles.chart}
                     yAxisLabel=""
-                    yAxisSuffix=""
+                    yAxisSuffix="개"
                 />
             </ChartContainer>
 
-            {/* 차트3: 키워드 트렌드 */}
+            {/* 3 키워드 트렌드 */}
             {keywordTrendCharts}
 
-            {/* 차트4: 버그 보고 횟수 */}
+            {/* 4 버그 보고 */}
             <ChartContainer title="버그 보고 횟수">
                 <BarChart
                     data={bugReportData}
@@ -520,11 +356,11 @@ export const AISummaryCharts: React.FC<{ chartData: ChartData }> = ({ chartData 
                     chartConfig={chartConfig}
                     style={styles.chart}
                     yAxisLabel=""
-                    yAxisSuffix=""
+                    yAxisSuffix="개"
                 />
             </ChartContainer>
 
-            {/* 차트5: 리뷰 길이와 평점 관계 (스택바) */}
+            {/* 5 리뷰 길이 vs 평점 */}
             <ChartContainer title="리뷰 길이와 평점 관계">
                 <StackedBarChart
                     data={stackedData}
@@ -532,11 +368,21 @@ export const AISummaryCharts: React.FC<{ chartData: ChartData }> = ({ chartData 
                     height={220}
                     chartConfig={chartConfig}
                     style={styles.chart}
-                    hideLegend={false}
+                    hideLegend           /* 기본 레전드 제거 */
+                    withHorizontalLabels={false}   /* ← Y축 숫자·선 숨김 */
                 />
+                {/* 하단 커스텀 레전드 */}
+                <View style={styles.customLegend}>
+                    {stackedData.legend.map((l, i) => (
+                        <View key={l} style={styles.legendItem}>
+                            <View style={[styles.legendDot, { backgroundColor: stackedData.barColors[i] }]} />
+                            <Text style={styles.legendText}>{l}</Text>
+                        </View>
+                    ))}
+                </View>
             </ChartContainer>
 
-            {/* 차트6: 리뷰 작성 빈도 */}
+            {/* 6 리뷰 작성 빈도 */}
             <ChartContainer title="리뷰 작성 빈도">
                 <LineChart
                     data={volData}
@@ -545,14 +391,13 @@ export const AISummaryCharts: React.FC<{ chartData: ChartData }> = ({ chartData 
                     chartConfig={chartConfig}
                     bezier
                     style={styles.chart}
-                    formatXLabel={formatVolLabel}
                 />
             </ChartContainer>
         </ScrollView>
     );
 };
 
-/** 내부 스타일 */
+/* ──────────────────── 스타일 ──────────────────── */
 const styles = StyleSheet.create({
     chartCard: {
         backgroundColor: '#1E1E1E',
@@ -576,5 +421,10 @@ const styles = StyleSheet.create({
     chart: {
         borderRadius: 8,
         padding: 8
-    }
+    },
+    /* 커스텀 레전드 */
+    customLegend: { flexDirection: 'row', justifyContent: 'center', marginTop: 8 },
+    legendItem: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 4 },
+    legendDot: { width: 10, height: 10, borderRadius: 5, marginRight: 4 },
+    legendText: { color: '#FFF', fontSize: 12 }
 });

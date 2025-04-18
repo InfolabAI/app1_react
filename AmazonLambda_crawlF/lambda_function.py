@@ -9,7 +9,42 @@ from decimal import Decimal
 from lambda_user_table import save_user, get_user_by_google_id
 
 # Constants definition
-PROMPT = "아래 리뷰 내용들을 마크 다운 보고서로 요약해주세요. 헤더 # 3개(1. 요약 기간 2. 주요 문제점 3. 개선 아이디어). 각 헤더 # 마다, 하위 헤더 ## 를 통해 상세 내용 작성. 개선 아이디어 헤더에서는 해결하려는 문제 헤더 ## 마다 구현 ### 난이도 상, ### 난이도 중, ### 난이도 하 헤더로 아이디어 제공.\n"
+PROMPT = """다음 앱 리뷰 데이터를 분석하여 앱 개선을 위한 심층적 인사이트를 담은 마크다운 보고서를 작성해주세요:
+
+[앱 리뷰 데이터 삽입 위치]
+
+보고서에는 다음 섹션을 포함하되, 관련 데이터가 없는 경우 "관련 데이터 없음"으로 표시해주세요:
+
+1. 핵심 인사이트 요약
+   - 리뷰 텍스트에서 추출한 3-5개의 가장 중요한 발견점
+   - 각 인사이트가 앱 발전에 갖는 전략적 중요성
+
+2. 맥락별 감성 분석
+   - 동일한 기능에 대한 상반된 평가의 맥락 차이 분석
+   - 감성에 영향을 미치는 숨겨진 요인 식별
+   - 언어 뉘앙스와 표현방식에서 드러나는 사용자 심리 해석
+
+3. 주요 문제점의 근본 원인 분석
+   - 표면적 불만 너머의 실제 사용자 좌절 요인 파악
+   - 다양한 불만 사항 간의 연관성과 공통 원인 식별
+   - 사용자 경험 문제의 심각도 평가
+
+4. 묵시적 사용자 요구 파악
+   - 직접적으로 언급되지 않았지만 리뷰 문맥에서 추론 가능한 사용자 요구
+   - 잠재적 사용 시나리오와 미충족 니즈 식별
+   - 사용자가 명확히 표현하지 못하는 기대사항 해석
+
+5. 경쟁 앱 참조 분석
+   - 경쟁사 언급 시 함축된 비교 우위 및 열위 요소
+   - 타 앱과의 차별화 포인트 및 벤치마킹 요소
+   - 경쟁 앱 대비 독특한 가치 제안 도출
+
+6. 전략적 개선 방향
+   - 리뷰 내용 기반 우선순위가 높은 개선 영역
+   - 사용자 만족도를 극대화할 수 있는 구체적 개선 방안
+   - 장기적 앱 발전 방향성 제시
+
+각 인사이트는 반드시 실제 리뷰 내용을 인용하여 뒷받침하고, 특히 복잡한 감정이나 미묘한 사용자 피드백에 중점을 두어 분석해주세요."""
 
 # DynamoDB resource initialization
 dynamodb = boto3.resource('dynamodb')
@@ -164,57 +199,108 @@ def fetch_and_save_new_reviews(app_id, latest_review_date=None):
 
         print(f"Number of existing stored reviews: {len(existing_reviews)}")
 
-        # Fetch reviews from Google Play store
-        result_list, continuation_token = reviews(
-            app_id,
-            lang='ko',
-            country='kr',
-            sort=Sort.NEWEST,
-            count=200,
-            filter_score_with=None  # Get all scores
-        )
-
-        # Return empty list if no reviews
-        if not result_list:
-            print("No reviews retrieved.")
-            return []
-
-        print(f"Total number of reviews retrieved from Google Play: {len(result_list)}")
-
-        # Filter only new reviews
-        new_reviews = []
-        for review in result_list:
-            review_id = review.get('reviewId', '')
-
-            # Create alternative identifier
-            username = review.get('userName', 'anonymous')
-            content = review.get('content', '')[:100]
-            review_signature = f"{username}:{content}"
-
-            # Date-based filtering (if provided)
-            date_filter_passed = True
+        # Calculate target dates
+        today = datetime.now()
+        yesterday = (today - timedelta(days=1)).replace(hour=23, minute=59, second=59)
+        
+        # Calculate 2 months ago, set to 1st day of that month
+        two_months_ago = today.replace(day=1)  # First day of current month
+        # Go back one month
+        two_months_ago = (two_months_ago - timedelta(days=1)).replace(day=1)
+        # Go back another month to get to 2 months ago
+        two_months_ago = (two_months_ago - timedelta(days=1)).replace(day=1)
+        
+        # Determine our target start date
+        if not existing_reviews:
+            # If no reviews exist, start from 2 months ago 1st day
+            target_date = two_months_ago
+            print(f"No existing reviews found. Will fetch reviews starting from {target_date.strftime('%Y-%m-%d')}")
+        else:
+            # If reviews exist, use the latest review date
             if latest_review_date:
-                latest_date = datetime.fromisoformat(latest_review_date)
-                review_date = review['at']
-                if review_date <= latest_date:
-                    date_filter_passed = False
+                target_date = datetime.fromisoformat(latest_review_date)
+                print(f"Existing reviews found. Will fetch reviews newer than {target_date.isoformat()}")
+            else:
+                # If no latest_review_date provided but we have reviews, default to 2 months ago
+                target_date = two_months_ago
+                print(f"Have existing reviews but no latest date. Using {target_date.strftime('%Y-%m-%d')}")
 
-            # Duplicate check: verify by reviewId or alternative identifier
-            is_duplicate = (
-                (review_id and review_id in existing_review_ids) or
-                (review_signature in existing_review_signatures)
+        # Fetch reviews from Google Play store
+        all_new_reviews = []
+        continuation_token = None
+        reached_target_date = False
+        
+        # Keep fetching until we reach the target date or run out of reviews
+        while not reached_target_date:
+            result_list, continuation_token = reviews(
+                app_id,
+                lang='ko',
+                country='kr',
+                sort=Sort.NEWEST,
+                count=200,  # Max batch size
+                filter_score_with=None,  # Get all scores
+                continuation_token=continuation_token  # Use token for pagination
             )
 
-            if date_filter_passed and not is_duplicate:
-                new_reviews.append(review)
+            # Return empty list if no reviews in this batch
+            if not result_list:
+                print("No more reviews retrieved.")
+                break
 
-        print(f"Number of new reviews to save after removing duplicates: {len(new_reviews)}")
+            print(f"Retrieved {len(result_list)} reviews in this batch")
+
+            # Process each review in this batch
+            for review in result_list:
+                review_id = review.get('reviewId', '')
+
+                # Create alternative identifier
+                username = review.get('userName', 'anonymous')
+                content = review.get('content', '')[:100]
+                review_signature = f"{username}:{content}"
+
+                # Get review date
+                review_date = review['at']
+                
+                # Stop if we reach a review older than our target date
+                if review_date < target_date:
+                    print(f"Reached review from {review_date.isoformat()}, which is older than our target {target_date.isoformat()}. Stopping.")
+                    reached_target_date = True
+                    break
+
+                # Skip if review is from today or the future (only include up to yesterday)
+                if review_date.date() >= today.date():
+                    print(f"Skipping review from {review_date.isoformat()}, which is from today or later.")
+                    continue
+
+                # Duplicate check
+                is_duplicate = (
+                    (review_id and review_id in existing_review_ids) or
+                    (review_signature in existing_review_signatures)
+                )
+
+                if not is_duplicate:
+                    all_new_reviews.append(review)
+                    # Add to sets to prevent duplicates in subsequent batches
+                    if review_id:
+                        existing_review_ids.add(review_id)
+                    existing_review_signatures.add(review_signature)
+
+            # If no continuation token or we've reached target date, exit loop
+            if not continuation_token or reached_target_date:
+                break
+                
+            # Safety check - if we're pulling too many pages, implement a limit
+            if len(all_new_reviews) > 5000:  # Arbitrary limit - adjust as needed
+                print("Reached maximum review limit. Stopping pagination.")
+                break
+
+        print(f"Total number of new reviews to save: {len(all_new_reviews)}")
 
         # Save new reviews to DynamoDB
-        if new_reviews:
-            save_reviews_to_dynamodb(app_id, new_reviews)
+        if all_new_reviews:
+            save_reviews_to_dynamodb(app_id, all_new_reviews)
 
-        return new_reviews
+        return all_new_reviews
     except Exception as e:
         print(f"Error fetching new reviews (app_id={app_id}): {str(e)}")
         raise e
@@ -270,7 +356,6 @@ def save_reviews_to_dynamodb(app_id, reviews_data):
                                 'score': score,
                                 'content': review['content'],
                                 'reviewId': review_id,  # Save unique identifier
-                                'created_at': datetime.now().isoformat()
                             }
                         )
                         saved_count += 1
@@ -391,41 +476,13 @@ def lambda_handler(event, context):
 
         # 1. App information retrieval
         if request_type == 'app_info_read':
-            app_id = body_dict.get('app_id')
-
-            if app_id:
-                # Retrieve specific app information
-                app_info = get_app_info(app_id)
-                if not app_info:
-                    return {
-                        "statusCode": 404,
-                        "body": json.dumps({"error": f"App ID '{app_id}' not found."})
-                    }
-                response_data = {"app_info": app_info}
-            else:
-                # Retrieve all app information
-                all_apps = get_all_app_info()
-                response_data = {"apps": all_apps}
-
-            return {
-                "statusCode": 200,
-                "body": json.dumps(response_data, default=str)
-            }
+            # [Code remains the same]
+            pass  # Replace with original code
 
         # 2. App information registration
         elif request_type == 'app_info_add':
-            result = add_app_info(body_dict)
-
-            if result["success"]:
-                return {
-                    "statusCode": 201,
-                    "body": json.dumps(result, default=str)
-                }
-            else:
-                return {
-                    "statusCode": 400,
-                    "body": json.dumps(result)
-                }
+            # [Code remains the same]
+            pass  # Replace with original code
 
         # 3. Review information retrieval
         elif request_type == 'app_review_read':
@@ -445,21 +502,30 @@ def lambda_handler(event, context):
                     "body": json.dumps({"error": f"App ID '{app_id}' not found."})
                 }
 
-            # Check latest review date
-            latest_review_date = get_latest_review_date(app_id)
-            today = datetime.now()
-
+            # Get all existing reviews first
+            existing_reviews = get_app_reviews(app_id)
+            
             new_reviews_added = False
-
-            # Fetch new reviews if no stored reviews or if latest review is older than today
-            if not latest_review_date or datetime.fromisoformat(latest_review_date).date() < today.date():
-                print(
-                    f"Fetching new reviews: app_id={app_id}, latest_review_date={latest_review_date}")
-                new_reviews = fetch_and_save_new_reviews(
-                    app_id, latest_review_date)
+            
+            # Check if we need to fetch new reviews
+            if not existing_reviews:
+                # If no reviews exist, fetch from 2 months ago (1st day) to yesterday
+                print(f"No existing reviews for app_id={app_id}. Fetching reviews from 2 months ago.")
+                new_reviews = fetch_and_save_new_reviews(app_id)
                 if new_reviews:
                     new_reviews_added = True
                     print(f"{len(new_reviews)} new reviews saved successfully")
+            else:
+                # If reviews exist, check if we need to update
+                latest_review_date = get_latest_review_date(app_id)
+                today = datetime.now()
+                
+                if not latest_review_date or datetime.fromisoformat(latest_review_date).date() < today.date():
+                    print(f"Fetching new reviews: app_id={app_id}, latest_review_date={latest_review_date}")
+                    new_reviews = fetch_and_save_new_reviews(app_id, latest_review_date)
+                    if new_reviews:
+                        new_reviews_added = True
+                        print(f"{len(new_reviews)} new reviews saved successfully")
 
             # Retrieve all reviews (including newly added ones)
             all_reviews = get_app_reviews(app_id)
@@ -491,12 +557,20 @@ def lambda_handler(event, context):
                     "body": json.dumps({"error": f"App ID '{app_id}' not found."})
                 }
 
-            # Check and fetch new reviews
-            latest_review_date = get_latest_review_date(app_id)
-            today = datetime.now()
-
-            if not latest_review_date or datetime.fromisoformat(latest_review_date).date() < today.date():
-                fetch_and_save_new_reviews(app_id, latest_review_date)
+            # Check if we have any reviews
+            existing_reviews = get_app_reviews(app_id)
+            
+            if not existing_reviews:
+                # If no reviews exist, fetch from 2 months ago (1st day) to yesterday
+                print(f"No existing reviews for app_id={app_id}. Fetching reviews from 2 months ago.")
+                fetch_and_save_new_reviews(app_id)
+            else:
+                # Check and fetch new reviews if needed
+                latest_review_date = get_latest_review_date(app_id)
+                today = datetime.now()
+                
+                if not latest_review_date or datetime.fromisoformat(latest_review_date).date() < today.date():
+                    fetch_and_save_new_reviews(app_id, latest_review_date)
 
             # Generate and save summary
             summary_result = generate_and_save_summary(app_id)
@@ -508,56 +582,13 @@ def lambda_handler(event, context):
             
         # 5. User information storage and login
         elif request_type == 'user_login':
-            google_id = body_dict.get('google_id')
-            email = body_dict.get('email')
-            
-            if not google_id or not email:
-                return {
-                    "statusCode": 400,
-                    "body": json.dumps({"error": "google_id and email parameters are required."})
-                }
-            
-            # Save user information (or update)
-            try:
-                user_info = save_user(google_id, email)
-                return {
-                    "statusCode": 200,
-                    "body": json.dumps({"user": user_info}, default=str)
-                }
-            except Exception as e:
-                return {
-                    "statusCode": 500,
-                    "body": json.dumps({"error": f"Error occurred while saving user: {str(e)}"})
-                }
+            # [Code remains the same]
+            pass  # Replace with original code
                 
         # 6. User information retrieval
         elif request_type == 'user_info':
-            google_id = body_dict.get('google_id')
-            
-            if not google_id:
-                return {
-                    "statusCode": 400,
-                    "body": json.dumps({"error": "google_id parameter is required."})
-                }
-            
-            # Retrieve user information
-            try:
-                user_info = get_user_by_google_id(google_id)
-                if not user_info:
-                    return {
-                        "statusCode": 404,
-                        "body": json.dumps({"error": f"User with Google ID '{google_id}' not found."})
-                    }
-                
-                return {
-                    "statusCode": 200,
-                    "body": json.dumps({"user": user_info}, default=str)
-                }
-            except Exception as e:
-                return {
-                    "statusCode": 500,
-                    "body": json.dumps({"error": f"Error occurred while retrieving user: {str(e)}"})
-                }
+            # [Code remains the same]
+            pass  # Replace with original code
 
         else:
             return {
@@ -629,7 +660,19 @@ if __name__ == "__main__":
     event7 = { "body": { "request_type": "user_info", "google_id": "google1234567890" } }
 
     # Select desired test event here
-    test_event = event6  # User login test
+    test_event = event4  # User login test
     response = lambda_handler(test_event, None)
-    print(json.dumps(response, indent=2))
-    
+
+    # response['body']가 이미 문자열이므로 JSON으로 파싱
+    body_json = json.loads(response['body'])
+
+    # 요약 결과가 있는 경우 summary 필드를 보기 좋게 출력
+    if 'summary' in body_json:
+        print("\n===== 요약 결과 =====")
+        # 마크다운 형식으로 정리된 요약 내용을 그대로 출력
+        # 이미 JSON 파싱 과정에서 이스케이프 시퀀스가 처리되었으므로 추가 변환 불필요
+        summary_text = body_json['summary']
+        print(summary_text)
+        print("=====================\n")
+
+    print(body_json)

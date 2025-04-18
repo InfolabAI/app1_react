@@ -1,4 +1,5 @@
 *.zip
+api_key_setting.txt
 
 # Expo 프로젝트 폴더
 MyApp/android
