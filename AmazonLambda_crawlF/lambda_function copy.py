@@ -892,42 +892,11 @@ if __name__ == "__main__":
         }
     }
 
-    # Run all test events sequentially and save input/output to file
-    test_events = [event1, event2, event3, event4, event5, event6, event7, event8, event9]
-    
-    with open('input_output.txt', 'w') as f:
-        for i, event in enumerate(test_events, 1):
-            print(f"Running test event {i}...")
-            
-            # Write input to file
-            f.write(f"=== TEST EVENT {i} ===\n")
-            f.write("INPUT:\n")
-            f.write(json.dumps(event['body'], indent=2))
-            f.write("\n\n")
-            
-            # Run the handler
-            response = lambda_handler(event, None)
+    # Select desired test event here
+    test_event = event9  # User login test
+    response = lambda_handler(test_event, None)
 
-            # Parse response for display
-            body_json = json.loads(response['body'])
-            
-            # Write output to file
-            f.write("OUTPUT:\n")
-            f.write(str(body_json))
-            f.write("\n\n")
-            
-            
-            # Print summary if available
-            if 'summary' in body_json:
-                print(f"\n===== Test {i} Summary Result =====")
-                print(body_json['summary'])
-                print("=====================\n")
-            
-            print(f"Test {i} completed. Status code: {response['statusCode']}")
-    
-    print("All tests completed. Results saved to input_output.txt")
-    
-    # Parse the last response for display
+    # response['body']가 이미 문자열이므로 JSON으로 파싱
     body_json = json.loads(response['body'])
 
     # 요약 결과가 있는 경우 summary 필드를 보기 좋게 출력
