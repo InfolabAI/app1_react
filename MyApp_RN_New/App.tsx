@@ -18,7 +18,6 @@ import {
 import Markdown from 'react-native-markdown-display';
 import axios from 'axios';
 import cheerio from 'react-native-cheerio';
-import { generateAndSharePDF } from './utils/pdfGenerator';
 import mobileAds, { BannerAd, BannerAdSize, TestIds } from 'react-native-google-mobile-ads';
 import '@react-native-google-signin/google-signin';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -367,7 +366,7 @@ const fetchFromAPI = async (requestType: string, params = {}) => {
     const data = await response.json();
     console.log(`🔍 API 응답 데이터:`, data);
     return data;
-  } catch (error) {
+  } catch (error: any) {
     console.error(`🚨 API 요청 실패 (${requestType}):`, error);
     throw error;
   }
@@ -427,6 +426,8 @@ function AppListScreen({ navigation, route }: {
   const [filteredAppList, setFilteredAppList] = useState<AppItem[]>([]);
   const [settingsMenuVisible, setSettingsMenuVisible] = useState<boolean>(false);
   const [logoutConfirmVisible, setLogoutConfirmVisible] = useState<boolean>(false);
+  const [summaryCount, setSummaryCount] = useState<number>(0);
+  const [summaryCountLoading, setSummaryCountLoading] = useState<boolean>(false);
 
   const isRefreshingRef = useRef<boolean>(false);
   const lastRefreshTimeRef = useRef<number>(0);
@@ -442,6 +443,54 @@ function AppListScreen({ navigation, route }: {
 
   useEffect(() => { toastRef.current = toast; }, [toast]);
   useEffect(() => { appContextRef.current = appContext; }, [appContext]);
+
+  const fetchSummaryCount = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      setSummaryCountLoading(true);
+
+      const now = new Date();
+      const sevenDaysAgo = new Date(now);
+      sevenDaysAgo.setDate(now.getDate() - 7);
+
+      const startDate = sevenDaysAgo.toISOString();
+      const endDate = now.toISOString();
+
+      const data = await fetchFromAPI('summary_count', {
+        google_id: user.id,
+        start_date: startDate,
+        end_date: endDate
+      });
+
+      if (data && data.total_count !== undefined) {
+        setSummaryCount(data.total_count);
+      }
+    } catch (err) {
+      console.error('요약 사용량 조회 오류:', err);
+    } finally {
+      setSummaryCountLoading(false);
+    }
+  }, [user]);
+
+  // 화면이 포커스될 때마다 요약 사용량을 다시 불러오기
+  useFocusEffect(
+    useCallback(() => {
+      if (user) {
+        fetchSummaryCount();
+      }
+    }, [user, fetchSummaryCount])
+  );
+
+  const handleSummaryCountPress = useCallback(() => {
+    toast.show('최근 7일간 AI 요약 사용량입니다. 일주일에 최대 20회까지 사용 가능합니다.', 'info');
+  }, [toast]);
+
+  useEffect(() => {
+    if (user) {
+      fetchSummaryCount();
+    }
+  }, [user, fetchSummaryCount]);
 
   const fetchAppList = useCallback(async () => {
     if (isRefreshingRef.current) return Promise.resolve();
@@ -706,13 +755,20 @@ function AppListScreen({ navigation, route }: {
               {user?.name || '사용자'}님 환영합니다
             </PaperText>
           </View>
-          <IconButton
-            icon="cog"
-            mode="contained"
-            size={20}
-            onPress={handleShowSettings}
-            style={styles.settingsButton}
-          />
+          <View style={styles.userInfoRight}>
+            <TouchableOpacity onPress={handleSummaryCountPress}>
+              <PaperText style={styles.summaryCountText}>
+                {summaryCountLoading ? '...' : `${summaryCount}/20`}
+              </PaperText>
+            </TouchableOpacity>
+            <IconButton
+              icon="cog"
+              mode="contained"
+              size={20}
+              onPress={handleShowSettings}
+              style={styles.settingsButton}
+            />
+          </View>
         </View>
         <Divider style={styles.userDivider} />
       </View>
@@ -1095,6 +1151,12 @@ function ReviewScreen({ route }: {
     }
   };
 
+  // AI 요약 화면으로 이동하는 함수
+  const navigateToAISummary = () => {
+    toast.show('AI 요약을 생성합니다. 최대 몇 분이 소요될 수 있습니다.', 'info');
+    navigation.navigate('AISummary', { appId, appName });
+  };
+
   useEffect(() => {
     fetchReviews();
   }, [appId]);
@@ -1138,10 +1200,10 @@ function ReviewScreen({ route }: {
         </PaperText>
         <PaperButton
           mode="contained"
-          onPress={() => navigation.navigate('AISummary', { appId, appName })}
+          onPress={navigateToAISummary}
           style={styles.summaryButton}
         >
-          AI 요약
+          AI 요약 보기
         </PaperButton>
       </View>
       <FlatList
@@ -1167,6 +1229,7 @@ function AISummaryScreen({ route, navigation }: {
   navigation: NavigationProp<RootStackParamList, 'AISummary'>
 }): React.ReactElement {
   const toast = useToast();
+  const { user } = useAuth();
   const { appId, appName } = route.params;
   const [summary, setSummary] = useState<string>('');
   const [summaryLoading, setSummaryLoading] = useState<boolean>(false);
@@ -1174,13 +1237,16 @@ function AISummaryScreen({ route, navigation }: {
   const [reviews, setReviews] = useState<ReviewData[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<boolean>(false);
+  const [summaryUsageExceeded, setSummaryUsageExceeded] = useState<boolean>(false);
+  const [summaryCount, setSummaryCount] = useState<number>(0);
+  const [summaryAttemptCount, setSummaryAttemptCount] = useState<number>(0);
+  const [chartLoading, setChartLoading] = useState<boolean>(false);
 
   // [수정된 부분] chartData는 FileA의 ChartData 타입 사용
   const [chartData, setChartData] = useState<ChartData | null>(null);
   const [timeUnit, setTimeUnit] = useState<TimeUnit>('week');
 
   const [menuVisible, setMenuVisible] = useState<boolean>(false);
-  const [downloadingPDF, setDownloadingPDF] = useState<boolean>(false);
   const scrollViewRef = useRef<ScrollView>(null);
 
   useLayoutEffect(() => {
@@ -1194,11 +1260,6 @@ function AISummaryScreen({ route, navigation }: {
           }
         >
           <Menu.Item
-            onPress={downloadAsPDF}
-            title="PDF로 저장"
-            leadingIcon="file-pdf-box"
-          />
-          <Menu.Item
             onPress={shareContent}
             title="공유하기"
             leadingIcon="share-variant"
@@ -1207,6 +1268,111 @@ function AISummaryScreen({ route, navigation }: {
       ),
     });
   }, [navigation, menuVisible, summary]);
+
+  // Check summary usage count
+  const checkSummaryUsage = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      // Get the current date
+      const now = new Date();
+      const sevenDaysAgo = new Date(now);
+      sevenDaysAgo.setDate(now.getDate() - 7);
+
+      // Format dates for API request
+      const startDate = sevenDaysAgo.toISOString();
+      const endDate = now.toISOString();
+
+      const data = await fetchFromAPI('summary_count', {
+        google_id: user.id,
+        start_date: startDate,
+        end_date: endDate
+      });
+
+      if (data && data.total_count !== undefined) {
+        setSummaryCount(data.total_count);
+        setSummaryUsageExceeded(data.total_count >= 20);
+      }
+    } catch (err) {
+      console.error('요약 사용량 조회 오류:', err);
+      // Fail safe - if we can't check the limit, don't let them generate
+      setSummaryUsageExceeded(true);
+      toast.show('요약 사용량을 확인할 수 없습니다.', 'error');
+    }
+  }, [user, toast]);
+
+  // AI 요약 불러오기
+  const fetchSummary = async () => {
+    if (!user) {
+      toast.show('로그인이 필요합니다.', 'error');
+      return;
+    }
+
+    if (summaryUsageExceeded) {
+      toast.show('일주일 동안 요약 생성 한도(20회)를 초과했습니다.', 'error');
+      return;
+    }
+
+    try {
+      setSummaryLoading(true);
+
+      // 최대 3번 재시도하는 로직 추가
+      let attempt = 0;
+      const maxAttempts = 3;
+      let lastError;
+
+      // 재시도 간격을 더 길게 설정 (초 단위)
+      const retryDelays = [5, 10];
+
+      while (attempt < maxAttempts) {
+        try {
+          console.log(`AI 요약 시도 ${attempt + 1}/${maxAttempts}`);
+          setSummaryAttemptCount(attempt + 1);
+
+          const data = await fetchFromAPI('summary', {
+            app_id: appId,
+            google_id: user.id  // Include google_id in the request
+          });
+
+          if (data.success && data.summary) {
+            setSummary(data.summary);
+            setSummaryVisible(true);
+
+            toast.show(`${data.date_range} 기간의 리뷰가 요약되었습니다. 오늘 해당 요약이 이미 실행된 적이 있었다면 요약 사용량이 증가하지 않습니다.`, 'success');
+            checkSummaryUsage();
+            return; // 성공했으므로 함수 종료
+          } else {
+            throw new Error(data.error || '요약 생성에 실패했습니다.');
+          }
+        } catch (err: any) {
+          console.log(`재시도 ${attempt + 1}/${maxAttempts} 실패:`, err.message);
+          lastError = err;
+          attempt++;
+
+          // 마지막 시도가 아니면 잠시 대기 후 재시도
+          if (attempt < maxAttempts) {
+            const delay = retryDelays[attempt - 1] || 15;
+            console.log(`재시도 ${attempt}/${maxAttempts} - ${delay}초 후 다시 시도합니다...`);
+
+            // 현재 상태 업데이트
+            if (attempt === 1) {
+              toast.show(`요약 생성 중입니다. 잠시만 기다려주세요.`, 'info');
+            }
+
+            await new Promise(resolve => setTimeout(resolve, delay * 1000));
+          }
+        }
+      }
+
+      // 모든 시도가 실패한 경우에만 오류 메시지 표시
+      throw lastError || new Error('요약 생성에 실패했습니다.');
+    } catch (err: any) {
+      console.error('AI 요약 오류:', err);
+      toast.show(err.message || '요약 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.', 'error');
+    } finally {
+      setSummaryLoading(false);
+    }
+  };
 
   // 리뷰 불러오기
   useEffect(() => {
@@ -1234,6 +1400,9 @@ function AISummaryScreen({ route, navigation }: {
           // [수정된 부분] Victory 로직 대신 FileA의 generateChartData를 사용
           const generated = generateChartData(formattedReviews, timeUnit);
           setChartData(generated);
+
+          // Check summary usage
+          await checkSummaryUsage();
         } else {
           throw new Error('리뷰 데이터 형식이 올바르지 않습니다.');
         }
@@ -1252,51 +1421,34 @@ function AISummaryScreen({ route, navigation }: {
 
     fetchReviewData();
     return () => { isMounted = false; };
-  }, [appId, timeUnit]); // [수정된 부분] timeUnit이 바뀔 때마다 새로 계산
+  }, [appId]); // timeUnit 의존성 제거
+
+  // 화면 진입 시 자동으로 요약 생성 시작
+  useEffect(() => {
+    if (!loading && !summaryLoading && !summaryVisible && !summaryUsageExceeded) {
+      fetchSummary();
+    }
+  }, [loading]); // loading이 false가 되면 (리뷰 데이터 로딩 완료 시) 요약 시작
 
   // timeUnit이 변경될 때마다 차트 데이터 재생성
   useEffect(() => {
     if (reviews.length > 0) {
-      const generated = generateChartData(reviews, timeUnit);
-      setChartData(generated);
+      setChartLoading(true);
+
+      // setTimeout으로 UI 업데이트 시간을 확보
+      setTimeout(() => {
+        try {
+          const generated = generateChartData(reviews, timeUnit);
+          setChartData(generated);
+        } catch (error) {
+          console.error('차트 데이터 생성 오류:', error);
+          toast.show('차트 데이터를 생성하는 중 오류가 발생했습니다.', 'error');
+        } finally {
+          setChartLoading(false);
+        }
+      }, 100);
     }
   }, [timeUnit, reviews]);
-
-  // AI 요약 불러오기
-  const fetchSummary = async () => {
-    try {
-      setSummaryLoading(true);
-      const data = await fetchFromAPI('summary', { app_id: appId });
-
-      if (data.success && data.summary) {
-        setSummary(data.summary);
-        setSummaryVisible(true);
-
-        if (data.date_range) {
-          toast.show(`${data.date_range} 기간의 리뷰가 요약되었습니다.`, "success");
-        }
-      } else {
-        throw new Error(data.error || '요약 생성에 실패했습니다.');
-      }
-    } catch (err: any) {
-      console.error(err);
-      toast.show(err.message, "error");
-    } finally {
-      setSummaryLoading(false);
-    }
-  };
-
-  const downloadAsPDF = async () => {
-    try {
-      setDownloadingPDF(true);
-      setMenuVisible(false);
-      await generateAndSharePDF(appName, summary);
-    } catch (error) {
-      console.error('PDF 생성 오류:', error);
-    } finally {
-      setDownloadingPDF(false);
-    }
-  };
 
   const shareContent = async () => {
     try {
@@ -1307,14 +1459,14 @@ function AISummaryScreen({ route, navigation }: {
       });
     } catch (error) {
       console.error('공유 오류:', error);
-      toast.show("공유 중 오류가 발생했습니다.", "error");
+      toast.show('공유 중 오류가 발생했습니다.', 'error');
     }
   };
 
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <PaperText style={{ marginBottom: 8 }}>데이터 분석 중...</PaperText>
+        <PaperText style={{ marginBottom: 8 }}>리뷰 데이터 분석 중...</PaperText>
         <ActivityIndicator animating />
       </View>
     );
@@ -1337,70 +1489,47 @@ function AISummaryScreen({ route, navigation }: {
       contentContainerStyle={styles.scrollContentContainer}
     >
       <PaperText variant="titleLarge" style={{ textAlign: 'center', margin: 20 }}>
-        {appName} 리뷰 데이터 분석
+        {appName}
       </PaperText>
 
-      {/* 시간 단위 선택 */}
-      <View style={styles.timeUnitSelector}>
-        <PaperText style={styles.sectionTitle}>시간 단위 선택:</PaperText>
-        <View style={styles.timeUnitButtons}>
-          <PaperButton
-            mode={timeUnit === 'day' ? 'contained' : 'outlined'}
-            onPress={() => setTimeUnit('day')}
-            style={styles.timeUnitButton}
-          >
-            일별
-          </PaperButton>
-          <PaperButton
-            mode={timeUnit === 'week' ? 'contained' : 'outlined'}
-            onPress={() => setTimeUnit('week')}
-            style={styles.timeUnitButton}
-          >
-            주별
-          </PaperButton>
-          <PaperButton
-            mode={timeUnit === 'month' ? 'contained' : 'outlined'}
-            onPress={() => setTimeUnit('month')}
-            style={styles.timeUnitButton}
-          >
-            월별
-          </PaperButton>
+      {/* Usage limit warning */}
+      {summaryUsageExceeded && !summaryVisible && (
+        <View style={styles.usageLimitWarning}>
+          <PaperText style={styles.usageLimitText}>
+            일주일 동안 요약 생성 한도(20회)를 초과했습니다.
+          </PaperText>
         </View>
-      </View>
-
-      {/* [수정된 부분] Victory 차트 대신 FileA에서 만든 AISummaryCharts 컴포넌트로 대체 */}
-      {chartData && (
-        <AISummaryCharts chartData={chartData} />
       )}
 
-      {/* 텍스트 요약 버튼 / 내용 */}
+      {/* 텍스트 요약 상태 / 내용 */}
       <View style={styles.summarySection}>
         {!summaryVisible ? (
-          <PaperButton
-            mode="contained"
-            onPress={fetchSummary}
-            loading={summaryLoading}
-            disabled={summaryLoading}
-            icon="text-box-outline"
-            style={styles.summaryButton}
-          >
-            텍스트 요약 생성하기
-          </PaperButton>
+          <>
+            {summaryUsageExceeded ? (
+              <View style={styles.usageLimitWarning}>
+                <PaperText style={styles.usageLimitText}>
+                  일주일 동안 요약 생성 한도(20회)를 초과했습니다.
+                </PaperText>
+              </View>
+            ) : summaryLoading ? (
+              <View style={styles.summaryLoadingContainer}>
+                <ActivityIndicator size="small" color="#6200ee" style={{ marginRight: 8 }} />
+                <PaperText style={styles.summaryLoadingText}>
+                  AI 요약 생성 중입니다. 최대 몇 분이 소요될 수 있으며 처리가 완료될 때까지 기다려주세요.
+                </PaperText>
+              </View>
+            ) : (
+              <View style={styles.summaryLoadingContainer}>
+                <ActivityIndicator size="small" color="#6200ee" style={{ marginRight: 8 }} />
+                <PaperText style={styles.summaryLoadingText}>
+                  AI 요약 준비 중입니다...
+                </PaperText>
+              </View>
+            )}
+          </>
         ) : (
           <>
             <View style={styles.buttonContainer}>
-              <PaperButton
-                mode="contained"
-                onPress={downloadAsPDF}
-                icon="file-pdf-box"
-                style={styles.actionButton}
-                contentStyle={styles.actionButtonContent}
-                loading={downloadingPDF}
-                disabled={downloadingPDF}
-              >
-                PDF 저장
-              </PaperButton>
-
               <PaperButton
                 mode="contained"
                 onPress={shareContent}
@@ -1443,14 +1572,46 @@ function AISummaryScreen({ route, navigation }: {
         )}
       </View>
 
-      {downloadingPDF && (
-        <View style={styles.overlay}>
-          <ActivityIndicator size="large" color="#ffffff" />
-          <PaperText style={{ color: '#ffffff', marginTop: 10 }}>
-            PDF 생성 중...
-          </PaperText>
+      {/* 시간 단위 선택 */}
+      <View style={styles.timeUnitSelector}>
+        <PaperText style={styles.sectionTitle}>시간 단위 선택:</PaperText>
+        <View style={styles.timeUnitButtons}>
+          <PaperButton
+            mode={timeUnit === 'day' ? 'contained' : 'outlined'}
+            onPress={() => setTimeUnit('day')}
+            style={styles.timeUnitButton}
+            disabled={chartLoading}
+          >
+            일별
+          </PaperButton>
+          <PaperButton
+            mode={timeUnit === 'week' ? 'contained' : 'outlined'}
+            onPress={() => setTimeUnit('week')}
+            style={styles.timeUnitButton}
+            disabled={chartLoading}
+          >
+            주별
+          </PaperButton>
+          <PaperButton
+            mode={timeUnit === 'month' ? 'contained' : 'outlined'}
+            onPress={() => setTimeUnit('month')}
+            style={styles.timeUnitButton}
+            disabled={chartLoading}
+          >
+            월별
+          </PaperButton>
         </View>
-      )}
+      </View>
+
+      {/* 차트 로딩 상태 또는 차트 */}
+      {chartLoading ? (
+        <View style={styles.chartLoadingContainer}>
+          <ActivityIndicator size="large" color="#6200ee" />
+          <PaperText style={styles.chartLoadingText}>차트 업데이트 중...</PaperText>
+        </View>
+      ) : chartData ? (
+        <AISummaryCharts chartData={chartData} />
+      ) : null}
     </ScrollView>
   );
 }
@@ -1566,7 +1727,6 @@ function AuthNavigator() {
           <Stack.Screen name="AppList" component={AppListScreen} options={{ title: '앱 목록' }} />
           <Stack.Screen name="Help" component={HelpScreen} options={{ title: '앱 추가' }} />
           <Stack.Screen name="Review" component={ReviewScreen} options={{ title: '앱 리뷰' }} />
-          {/* [수정된 부분] AISummaryScreen은 이제 Victory 코드가 빠졌음 */}
           <Stack.Screen name="AISummary" component={AISummaryScreen} options={{ title: 'AI 요약' }} />
         </>
       )}
@@ -1615,6 +1775,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center'
   },
+  userInfoRight: {
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
   userAvatar: {
     marginRight: 8
   },
@@ -1622,6 +1786,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold'
+  },
+  summaryCountText: {
+    color: '#4CAF50',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginRight: 8
   },
   settingsButton: {
     margin: 0,
@@ -1765,5 +1935,49 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginBottom: 24,
     padding: 16,
+  },
+  usageLimitWarning: {
+    backgroundColor: '#FF5252',
+    padding: 12,
+    borderRadius: 8,
+    marginHorizontal: 16,
+    marginBottom: 16,
+  },
+  usageLimitText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  summaryLoadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
+    backgroundColor: '#2D2D2D',
+    borderRadius: 8,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#444',
+  },
+  summaryLoadingText: {
+    color: '#ccc',
+    fontSize: 14,
+    flex: 1,
+    lineHeight: 20,
+  },
+  chartLoadingContainer: {
+    padding: 40,
+    marginBottom: 16,
+    backgroundColor: '#1E1E1E',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: 300,
+  },
+  chartLoadingText: {
+    color: '#fff',
+    fontSize: 16,
+    marginTop: 16,
   },
 });

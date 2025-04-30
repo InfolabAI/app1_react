@@ -188,6 +188,49 @@ class LLM:
             
             return final_score
         
+        # 텍스트 특성 추출 함수 - NumPy 사용 최적화
+        def extract_features(text):
+            words = [w for w in text.split() if w]
+            
+            # 빠른 단어 빈도 계산
+            unique_words = set(words)
+            
+            # NumPy 배열로 특성 저장 (기존 7개 특성)
+            # [length, word_count, avg_word_length, unique_word_ratio, special_char_ratio, digit_ratio, sentence_count]
+            features = np.zeros(7, dtype=np.float32)
+            
+            features[0] = len(text)                                              # length
+            features[1] = len(words)                                             # word_count
+            features[2] = len(text) / max(1, len(words))                         # avg_word_length
+            features[3] = len(unique_words) / max(1, len(words))                 # unique_word_ratio
+            
+            # 특수문자 및 숫자 비율 계산 - numpy로 벡터화
+            text_array = np.array(list(text))
+            features[4] = np.sum(~np.char.isalnum(text_array) & ~np.char.isspace(text_array)) / max(1, len(text))  # special_char_ratio
+            features[5] = np.sum(np.char.isdigit(text_array)) / max(1, len(text))  # digit_ratio
+            
+            # 문장 수 계산 - 문자열 메서드 사용
+            features[6] = sum(1 for c in text if c in '.!?')                     # sentence_count
+            
+            return features
+        
+        # 두 텍스트 특성 간 거리 계산 - NumPy 사용 최적화
+        def calculate_distance(features1, features2):
+            # 가중치 벡터 정의 (기존과 동일한 가중치)
+            weights = np.array([0.1, 0.15, 0.2, 0.25, 0.1, 0.1, 0.1], dtype=np.float32)
+            
+            # 벡터화된 거리 계산
+            diff = np.abs(features1 - features2)
+            max_values = np.maximum(features1, features2)
+            max_values = np.where(max_values == 0, 1, max_values)  # 0으로 나누기 방지
+            
+            normalized_diff = diff / max_values
+            
+            # 가중 거리 합계 계산
+            distance = np.sum(weights * normalized_diff)
+            
+            return distance
+
         def jaccard_similarity(sentence1, sentence2):
             """
             두 문장의 단어 유사도를 측정하는 가장 가벼운 함수
@@ -221,11 +264,20 @@ class LLM:
         sorted_indices = sorted(range(len(quality_scores)), key=lambda i: quality_scores[i], reverse=True)
         candidate_indices = sorted_indices[:min(100, len(sorted_indices))]
         
+        print("Extracting text features...")
+        # 텍스트 특성 추출 - 후보 인덱스에 해당하는 텍스트만 특성 추출, 나머지는 None
+        features = []
+        for i in range(len(text_list)):
+            if i in candidate_indices:
+                features.append(extract_features(text_list[i]))
+            else:
+                features.append(None)
+        
         # 결과 저장 변수
         selected_indices = []
         selected_texts = []
         total_length = 0
-        selected_diversity_scores = []
+        
         # 첫 텍스트 선택: 품질 점수와 길이를 모두 고려
         best_first_index = -1
         best_first_score = -1
@@ -243,7 +295,6 @@ class LLM:
         if best_first_index >= 0:
             selected_indices.append(best_first_index)
             selected_texts.append(text_list[best_first_index])
-            selected_diversity_scores.append(0)
             total_length += len(text_list[best_first_index])
             
             # 후보 목록에서 선택된 항목 제거
@@ -254,15 +305,10 @@ class LLM:
         
         print("Selecting diverse texts...")
         # 남은 텍스트에서 선택 (품질과 다양성 모두 고려)
-        
-        # 선택된 텍스트들을 하나의 문자열로 누적
-        accumulated_selected_text = text_list[selected_indices[0]]
-        
         while candidate_indices and total_length < 5000:
             best_index = -1
             best_combined_score = -1
-            best_diversity_score = -1
-
+            
             # 각 후보 텍스트에 대해
             for index in candidate_indices[:]:
                 text = text_list[index]
@@ -271,22 +317,25 @@ class LLM:
                 if total_length + len(text) > 5000:
                     continue
                 
-                # 1. 다양성 점수 계산: 누적된 선택 텍스트와의 유사도 계산
-                # 유사도가 낮을수록 다양성이 높음 (1 - 유사도)
-                similarity = jaccard_similarity(text, accumulated_selected_text)
-                diversity_score = 1 - similarity
+                # 1. 다양성 점수 계산: 이미 선택된 모든 텍스트와의 최소 거리
+                min_distance = float('inf')
+                for selected_index in selected_indices:
+                    distance = calculate_distance(features[index], features[selected_index])
+                    min_distance = min(min_distance, distance)
+                
+                # 정규화된 다양성 점수 (0-1 범위)
+                diversity_score = min(1, min_distance * 2)
                 
                 # 2. 품질 점수
                 quality_score = quality_scores[index]
                 
-                # 3. 결합 점수 (품질 10%, 다양성 90%)
-                combined_score = quality_score * 0.1 + diversity_score * 0.9
+                # 3. 결합 점수 (품질 60%, 다양성 40%)
+                combined_score = quality_score * 0.6 + diversity_score * 0.4
                 
                 # 최고 점수 갱신
                 if combined_score > best_combined_score:
                     best_combined_score = combined_score
                     best_index = index
-                    best_diversity_score = diversity_score
             
             # 더 이상 적합한 텍스트가 없으면 종료
             if best_index == -1:
@@ -294,27 +343,22 @@ class LLM:
             
             # 선택된 텍스트 추가
             selected_indices.append(best_index)
-            selected_diversity_scores.append(best_diversity_score)
             selected_texts.append(text_list[best_index])
             total_length += len(text_list[best_index])
-            
-            # 누적 텍스트 업데이트 - 새로 선택된 텍스트 추가
-            accumulated_selected_text += " " + text_list[best_index]
             
             # 선택된 인덱스 제거
             candidate_indices.remove(best_index)
         
-        # 선택된 텍스트와 품질 점수, 다양성 점수를 함께 저장
-        selected_text_with_scores = [(text, quality_scores[idx], selected_diversity_scores[i]) 
-                                    for i, (text, idx) in enumerate(zip(selected_texts, selected_indices))]
+        # 선택된 텍스트와 품질 점수를 함께 저장
+        selected_text_with_scores = [(text, quality_scores[idx]) for text, idx in zip(selected_texts, selected_indices)]
         
         # 품질 점수 기준으로 내림차순 정렬
         selected_text_with_scores.sort(key=lambda x: x[1], reverse=True)
         
         # 정렬된 결과 출력
-        print("Selected texts with quality scores and diversity scores (highest quality first):")
-        for i, (text, quality, diversity) in enumerate(selected_text_with_scores):
-            print(f"[{i+1}] Quality: {quality:.2f}, Diversity: {diversity:.2f} - Text: {text[:50]}...")
+        print("Selected texts with quality scores (highest first):")
+        for i, (text, score) in enumerate(selected_text_with_scores):
+            print(f"[{i+1}] Score: {score:.2f} - Text: {text[:50]}...")
         print("Selected texts: ", selected_texts)
         
         # 원래 순서의 텍스트만 반환

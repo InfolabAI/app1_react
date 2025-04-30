@@ -433,12 +433,25 @@ def generate_and_save_summary(app_id, google_id, reviews=None):
             }
 
         # Convert review data
-        df = pd.DataFrame(reviews)
-        df['date'] = pd.to_datetime(df['date'])
+        init_df = pd.DataFrame(reviews)
+        init_df['date'] = pd.to_datetime(init_df['date'])
+
+
+        # 리뷰 품질 관리를 위해 리뷰 길이를 보장하며 너무 긴 것은 제외함
+        init_df['content_length'] = init_df['content'].apply(lambda x: len(x) if isinstance(x, str) else 0)
+        init_df = init_df[init_df['content_length'] > 50]
+        init_df = init_df[init_df['content_length'] < 400]
+
+        # 리뷰가 너무 많을 경우를 대비해서 computation cost 줄이기 위해 최근 500개만 추림
+        init_df = init_df.sort_values(by='date', ascending=False)
+        df = init_df.head(500)
+        del init_df
+        df = df.reset_index(drop=True)
 
         # Calculate summary date range
         first_date = df['date'].min().strftime('%Y-%m-%d')
         last_date = df['date'].max().strftime('%Y-%m-%d')
+
         
         # Check if summary with same app_id and end_date already exists (caching)
         existing_summary = get_summary_by_app_id_and_end_date(app_id, last_date)
@@ -458,10 +471,13 @@ def generate_and_save_summary(app_id, google_id, reviews=None):
         # Extract review content
         text_list = df['content'].tolist()
         selected_text_list = llm.sampling(text_list)
+        print(f"Sampling completed")
+
         selected_texts = ' '.join(selected_text_list)
 
         # Generate summary
         summary = llm(prompt, selected_texts)
+        print(f"Summary generated")
 
         # Save summary information to DynamoDB
         # Important: Convert float to Decimal
@@ -826,6 +842,10 @@ def lambda_handler(event, context):
 
 # Local test code
 if __name__ == "__main__":
+    # App 에서 발생한 에러에 대한 확인 작업
+    #event0 = { "body": {"request_type":"summary","app_id":"com.kakao.talk","google_id":"103189138683203549311"} }
+    event0 = { "body": {"request_type":"summary","app_id":"com.hanabank.mzplatform","google_id":"103189138683203549311"} }
+
     # App information retrieval test
     event1 = {
         "body": {
@@ -875,12 +895,7 @@ if __name__ == "__main__":
     event7 = { "body": { "request_type": "user_info", "google_id": "google1234567890" } }
 
     # New test event for summary count
-    event8 = {
-        "body": {
-            "request_type": "summary_count",
-            "google_id": "google123456789"
-        }
-    }
+    event8 = { "body": { "request_type": "summary_count", "google_id": "google123456789" } }
 
     # New test event for summary count with date range
     event9 = {
@@ -892,8 +907,10 @@ if __name__ == "__main__":
         }
     }
 
+
     # Run all test events sequentially and save input/output to file
-    test_events = [event1, event2, event3, event4, event5, event6, event7, event8, event9]
+    #test_events = [event0, event1, event2, event3, event4, event5, event6, event7, event8, event9]
+    test_events = [event0]
     
     with open('input_output.txt', 'w') as f:
         for i, event in enumerate(test_events, 1):
