@@ -6,6 +6,16 @@ const {getDefaultConfig, mergeConfig} = require('@react-native/metro-config');
  *
  * @type {import('@react-native/metro-config').MetroConfig}
  */
-const config = {};
+const config = {
+  watchFolders: [],
+  server: {
+    useGlobalHotkey: false,
+  },
+  watcher: {
+    watchman: false,
+    usePolling: true,
+    interval: 1000,
+  },
+};
 
 module.exports = mergeConfig(getDefaultConfig(__dirname), config);

@@ -1,0 +1,190 @@
+{
+  "summary": {
+    "py_selected_count": 20,
+    "js_selected_count": 20,
+    "common_selected_count": 20,
+    "jaccard_similarity": 1.0,
+    "quality_score_correlation": 1.0,
+    "avg_quality_diff": 0.0,
+    "max_quality_diff": 0
+  },
+  "quality_comparison": {
+    "correlation": 1.0,
+    "avg_diff": 0.0,
+    "max_diff": 0,
+    "details": [
+      {
+        "index": 0,
+        "py_score": 0.716079687039529,
+        "js_score": 0.716079687039529,
+        "diff": 0.0,
+        "diff_percent": 0.0
+      },
+      {
+        "index": 1,
+        "py_score": 0.6654063898347483,
+        "js_score": 0.6654063898347483,
+        "diff": 0.0,
+        "diff_percent": 0.0
+      },
+      {
+        "index": 2,
+        "py_score": 0.6691809942412661,
+        "js_score": 0.6691809942412661,
+        "diff": 0.0,
+        "diff_percent": 0.0
+      },
+      {
+        "index": 3,
+        "py_score": 0.6506416887330627,
+        "js_score": 0.6506416887330627,
+        "diff": 0.0,
+        "diff_percent": 0.0
+      },
+      {
+        "index": 4,
+        "py_score": 0.718430229697216,
+        "js_score": 0.718430229697216,
+        "diff": 0.0,
+        "diff_percent": 0.0
+      },
+      {
+        "index": 5,
+        "py_score": 0.549759799590422,
+        "js_score": 0.549759799590422,
+        "diff": 0.0,
+        "diff_percent": 0.0
+      },
+      {
+        "index": 6,
+        "py_score": 0.6734514462698408,
+        "js_score": 0.6734514462698408,
+        "diff": 0.0,
+        "diff_percent": 0.0
+      },
+      {
+        "index": 7,
+        "py_score": 0.6783346820590429,
+        "js_score": 0.6783346820590429,
+        "diff": 0.0,
+        "diff_percent": 0.0
+      },
+      {
+        "index": 8,
+        "py_score": 0.6717813344649439,
+        "js_score": 0.6717813344649439,
+        "diff": 0.0,
+        "diff_percent": 0.0
+      },
+      {
+        "index": 9,
+        "py_score": 0.676877804765161,
+        "js_score": 0.676877804765161,
+        "diff": 0.0,
+        "diff_percent": 0.0
+      },
+      {
+        "index": 10,
+        "py_score": 0.6763368483066869,
+        "js_score": 0.6763368483066869,
+        "diff": 0.0,
+        "diff_percent": 0.0
+      },
+      {
+        "index": 11,
+        "py_score": 0.6689841162107648,
+        "js_score": 0.6689841162107648,
+        "diff": 0.0,
+        "diff_percent": 0.0
+      },
+      {
+        "index": 12,
+        "py_score": 0.6638477909203278,
+        "js_score": 0.6638477909203278,
+        "diff": 0.0,
+        "diff_percent": 0.0
+      },
+      {
+        "index": 13,
+        "py_score": 0.6782976326204124,
+        "js_score": 0.6782976326204124,
+        "diff": 0.0,
+        "diff_percent": 0.0
+      },
+      {
+        "index": 14,
+        "py_score": 0.6797352781088934,
+        "js_score": 0.6797352781088934,
+        "diff": 0.0,
+        "diff_percent": 0.0
+      },
+      {
+        "index": 15,
+        "py_score": 0.6750010854575713,
+        "js_score": 0.6750010854575713,
+        "diff": 0.0,
+        "diff_percent": 0.0
+      },
+      {
+        "index": 16,
+        "py_score": 0.6683627395927783,
+        "js_score": 0.6683627395927783,
+        "diff": 0.0,
+        "diff_percent": 0.0
+      },
+      {
+        "index": 17,
+        "py_score": 0.7192885658594768,
+        "js_score": 0.7192885658594768,
+        "diff": 0.0,
+        "diff_percent": 0.0
+      },
+      {
+        "index": 18,
+        "py_score": 0.6734507494146875,
+        "js_score": 0.6734507494146875,
+        "diff": 0.0,
+        "diff_percent": 0.0
+      },
+      {
+        "index": 19,
+        "py_score": 0.7177230530940284,
+        "js_score": 0.7177230530940284,
+        "diff": 0.0,
+        "diff_percent": 0.0
+      }
+    ]
+  },
+  "selection_comparison": {
+    "common_count": 20,
+    "common_selected": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19
+    ],
+    "py_only_count": 0,
+    "py_only": [],
+    "js_only_count": 0,
+    "js_only": [],
+    "py_selected_count": 20,
+    "js_selected_count": 20,
+    "jaccard_similarity": 1.0
+  }
+}

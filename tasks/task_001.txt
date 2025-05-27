@@ -1,0 +1,121 @@
+# Task ID: 1
+# Title: App.tsx 화면 컴포넌트 분리
+# Status: done
+# Dependencies: None
+# Priority: high
+# Description: App.tsx 파일에서 각 화면 컴포넌트를 별도의 파일로 분리하여 코드 가독성과 유지보수성을 향상시킵니다.
+# Details:
+1. screens 디렉토리 생성
+2. 각 화면(HomeScreen, ReviewScreen, SettingsScreen 등)을 별도 파일로 분리
+3. 각 화면 컴포넌트에 필요한 props 타입 정의
+4. App.tsx에서 분리된 컴포넌트 import 및 사용
+5. 네비게이션 구조 유지
+
+```typescript
+// screens/ReviewScreen.tsx 예시
+import React from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+
+type ReviewScreenProps = {
+  // 필요한 props 정의
+};
+
+const ReviewScreen: React.FC<ReviewScreenProps> = (props) => {
+  // 기존 ReviewScreen 로직 구현
+  return (
+    <View style={styles.container}>
+      {/* 화면 컴포넌트 내용 */}
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    // 스타일 정의
+  },
+});
+
+export default ReviewScreen;
+```
+
+# Test Strategy:
+1. 각 분리된 화면 컴포넌트가 독립적으로 렌더링되는지 확인
+2. 기존 App.tsx의 기능이 분리 후에도 동일하게 작동하는지 확인
+3. 네비게이션 흐름이 정상적으로 작동하는지 테스트
+4. 각 화면 간 데이터 전달이 올바르게 이루어지는지 확인
+
+# Subtasks:
+## 1. 화면 컴포넌트 식별 및 분리 계획 수립 [done]
+### Dependencies: None
+### Description: App.tsx에서 분리해야 할 화면 컴포넌트들을 식별하고 각 컴포넌트의 역할과 책임을 정의합니다.
+### Details:
+1. App.tsx 코드를 분석하여 분리 가능한 독립적인 컴포넌트들을 식별합니다.
+2. 각 컴포넌트의 기능적 책임과 역할을 명확히 정의합니다.
+3. 컴포넌트 간의 관계와 데이터 흐름을 다이어그램으로 시각화합니다.
+4. 컴포넌트 파일 구조와 네이밍 규칙을 결정합니다.
+5. 분리 작업의 우선순위를 설정합니다.
+<info added on 2025-05-20T13:58:19.424Z>
+분석 결과 식별된 분리 가능한 컴포넌트:
+
+**화면 컴포넌트:**
+- LoginScreen (377-408줄): 로그인 화면
+- AppListScreen (412-861줄): 앱 목록 화면
+- HelpScreen (866-1104줄): 도움말/앱 추가 화면
+- ReviewScreen (1109-1222줄): 앱 리뷰 화면
+- AISummaryScreen (1227-1616줄): AI 요약 화면
+
+**공통 컴포넌트 및 유틸리티:**
+- Toast 관련 (132-204줄): Toast 컴포넌트, ToastProvider, useToast hook
+- Auth 관련 (207-338줄): AuthProvider, useAuth hook
+- API 관련 (341-373줄): fetchFromAPI 함수
+- AuthNavigator (1702-1735줄): 인증 관련 네비게이션 로직
+- AdBanner (1620-1632줄): 광고 배너 컴포넌트
+
+**제안 디렉토리 구조:**
+```
+/MyApp_RN_New
+  /src
+    /components    - 재사용 가능한 컴포넌트
+    /contexts      - Context API 관련 코드
+    /screens       - 화면 컴포넌트
+    /navigation    - 네비게이션 관련 코드
+    /api           - API 관련 코드
+    /types         - 타입 정의
+    /utils         - 유틸리티 함수
+```
+
+**컴포넌트 역할 및 책임:**
+- LoginScreen: 구글 로그인 UI 및 로직 처리
+- AppListScreen: 앱 목록 표시, 검색, 데이터 관리
+- HelpScreen: 앱 추가 방법 안내, 플레이스토어 링크 처리
+- ReviewScreen: 앱 리뷰 목록 표시 및 데이터 관리
+- AISummaryScreen: AI 요약 내용 표시, 차트 시각화, 공유 기능
+
+**컴포넌트 간 데이터 흐름:**
+- AuthContext를 통한 사용자 인증 정보 공유
+- AppContext를 통한 앱 목록 새로고침 기능 공유
+- ToastContext를 통한 토스트 메시지 표시 기능 공유
+- 네비게이션 파라미터를 통한 화면 간 데이터 전달
+</info added on 2025-05-20T13:58:19.424Z>
+
+## 2. 컴포넌트 분리 및 Props 타입 정의 [done]
+### Dependencies: 1.1
+### Description: 식별된 컴포넌트들을 개별 파일로 분리하고 각 컴포넌트에 필요한 Props 타입을 TypeScript로 정의합니다.
+### Details:
+1. 각 컴포넌트를 별도의 .tsx 파일로 분리합니다.
+2. 각 컴포넌트에 필요한 Props 인터페이스를 TypeScript로 정의합니다.
+3. 컴포넌트 간 데이터 전달을 위한 Props 구조를 설계합니다.
+4. 필요한 경우 공통 타입을 별도 파일로 분리합니다.
+5. 각 컴포넌트의 기능이 독립적으로 작동하는지 확인합니다.
+
+## 3. App.tsx에서 컴포넌트 통합 및 테스트 [done]
+### Dependencies: 1.2
+### Description: 분리된 컴포넌트들을 App.tsx에서 통합하고 전체 애플리케이션이 정상적으로 작동하는지 테스트합니다.
+### Details:
+1. App.tsx에서 분리된 컴포넌트들을 import하여 통합합니다.
+2. 필요한 Props를 각 컴포넌트에 전달합니다.
+3. 네비게이션 구조가 올바르게 유지되는지 확인합니다.
+4. 컴포넌트 간 데이터 흐름이 정상적으로 작동하는지 테스트합니다.
+5. 리팩토링 전후의 기능이 동일하게 유지되는지 확인합니다.
+6. 필요한 경우 성능 최적화를 위한 추가 조정을 수행합니다.
+

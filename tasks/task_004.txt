@@ -1,0 +1,110 @@
+# Task ID: 4
+# Title: 샘플링 진행 상태 UI 구현
+# Status: done
+# Dependencies: 3
+# Priority: medium
+# Description: 리뷰 데이터 샘플링 진행 상황을 사용자에게 시각적으로 표시하는 UI 컴포넌트를 구현합니다.
+# Details:
+1. components 디렉토리 생성
+2. SamplingProgress.tsx 컴포넌트 구현
+3. 진행 상태 표시 바 및 퍼센트 표시 구현
+4. 샘플링 완료 시 알림 표시
+5. ReviewScreen에 진행 상태 컴포넌트 통합
+
+```typescript
+// components/SamplingProgress.tsx 예시
+import React from 'react';
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+
+type SamplingProgressProps = {
+  total: number;
+  processed: number;
+  completed: boolean;
+};
+
+const SamplingProgress: React.FC<SamplingProgressProps> = ({ total, processed, completed }) => {
+  const progressPercentage = total > 0 ? Math.floor((processed / total) * 100) : 0;
+  
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>샘플링 진행 중...</Text>
+      <View style={styles.progressBarContainer}>
+        <View 
+          style={[styles.progressBar, { width: `${progressPercentage}%` }]} 
+        />
+      </View>
+      <Text style={styles.progressText}>
+        {processed}/{total} 처리됨 ({progressPercentage}%)
+      </Text>
+      {!completed && <ActivityIndicator style={styles.spinner} />}
+      {completed && <Text style={styles.completedText}>샘플링 완료!</Text>}
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    padding: 16,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    marginVertical: 10,
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  progressBarContainer: {
+    height: 10,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 5,
+    overflow: 'hidden',
+  },
+  progressBar: {
+    height: '100%',
+    backgroundColor: '#4caf50',
+  },
+  progressText: {
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  spinner: {
+    marginTop: 10,
+  },
+  completedText: {
+    marginTop: 10,
+    textAlign: 'center',
+    color: '#4caf50',
+    fontWeight: 'bold',
+  },
+});
+
+export default SamplingProgress;
+```
+
+# Test Strategy:
+1. 다양한 진행 상태 값으로 컴포넌트 렌더링 테스트
+2. 진행 상태 바가 올바른 비율로 표시되는지 확인
+3. 완료 상태 전환 시 UI 변화 테스트
+4. 다양한 화면 크기에서의 반응형 레이아웃 테스트
+5. 접근성 테스트(스크린 리더 호환성 등)
+
+# Subtasks:
+## 1. 진행 상태 표시 UI 컴포넌트 설계 [done]
+### Dependencies: None
+### Description: 샘플링 진행 상태를 시각적으로 표시할 UI 컴포넌트의 디자인 및 구조 설계
+### Details:
+진행 바(Progress Bar), 퍼센트 표시, 현재 단계 표시, 완료 알림 등의 UI 요소를 포함한 컴포넌트 설계도 작성. 반응형 디자인 고려 및 사용자 경험 최적화를 위한 애니메이션 효과 계획. 컴포넌트의 props 인터페이스 정의 및 상태 관리 방식 결정.
+
+## 2. 진행 상태 UI 컴포넌트 구현 [done]
+### Dependencies: 4.1
+### Description: 설계된 UI 컴포넌트의 코드 구현 및 스타일링
+### Details:
+설계에 따라 진행 바, 퍼센트 표시 등의 UI 요소 구현. CSS/SCSS를 활용한 컴포넌트 스타일링 및 애니메이션 효과 적용. 다양한 상태(시작 전, 진행 중, 일시 정지, 완료, 오류 등)에 대한 시각적 피드백 구현. 접근성(Accessibility) 고려 및 크로스 브라우저 호환성 테스트.
+
+## 3. 샘플링 로직과 UI 컴포넌트 통합 [done]
+### Dependencies: 4.2
+### Description: 구현된 UI 컴포넌트와 샘플링 처리 로직의 연동 및 통합
+### Details:
+샘플링 프로세스의 진행 상태를 실시간으로 UI에 반영하기 위한 이벤트 핸들러 구현. 샘플링 시작, 진행률 업데이트, 완료, 오류 등의 이벤트에 대한 UI 반응 로직 구현. 비동기 처리 및 상태 관리를 위한 코드 작성. 전체 애플리케이션 내에서의 컴포넌트 통합 및 최종 테스트.
+

@@ -1,0 +1,89 @@
+# Task ID: 2
+# Title: 공통 유틸리티 및 함수 모듈화
+# Status: done
+# Dependencies: 1
+# Priority: medium
+# Description: 앱 전반에서 사용되는 공통 함수와 유틸리티를 별도의 모듈로 분리하여 코드 중복을 줄이고 재사용성을 높입니다.
+# Details:
+1. utils 디렉토리 생성
+2. API 호출 관련 함수를 api.ts 파일로 분리
+3. 데이터 포맷팅 함수를 formatters.ts 파일로 분리
+4. 인증 관련 함수를 auth.ts 파일로 분리
+5. 기타 공통 유틸리티 함수 분리
+
+```typescript
+// utils/api.ts 예시
+import axios from 'axios';
+
+const API_BASE_URL = 'https://your-api-endpoint.com';
+
+export const fetchAppInfo = async (appId: string) => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/app_info_read?app_id=${appId}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching app info:', error);
+    throw error;
+  }
+};
+
+export const fetchAppReviews = async (appId: string, endDate: string) => {
+  try {
+    const response = await axios.get(
+      `${API_BASE_URL}/app_review_read?app_id=${appId}&end_date=${endDate}`
+    );
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching app reviews:', error);
+    throw error;
+  }
+};
+```
+
+# Test Strategy:
+1. 각 유틸리티 함수에 대한 단위 테스트 작성
+2. 모의 API 응답을 사용하여 API 호출 함수 테스트
+3. 다양한 입력 케이스에 대한 포맷팅 함수 테스트
+4. 분리된 함수들이 앱의 다양한 부분에서 올바르게 작동하는지 확인
+
+# Subtasks:
+## 1. 유틸리티 함수 카테고리 식별 및 분류 [done]
+### Dependencies: None
+### Description: 앱 전체에서 사용되는 공통 유틸리티 함수들을 식별하고 적절한 카테고리로 분류합니다.
+### Details:
+1. 코드베이스 전체를 검토하여 반복적으로 사용되는 유틸리티 함수들을 식별합니다.
+2. 식별된 함수들을 다음과 같은 카테고리로 분류합니다: API 호출 관련, 데이터 포맷팅, 날짜/시간 처리, 문자열 처리, 인증/권한 관련, 수학/계산 관련 등
+3. 각 카테고리별 함수 목록과 간략한 설명을 문서화합니다.
+4. 카테고리별 우선순위를 정하고 모듈화 계획을 수립합니다.
+
+## 2. 카테고리별 모듈 구조 및 타입 정의 [done]
+### Dependencies: 2.1
+### Description: 각 카테고리별 모듈의 구조를 설계하고 필요한 타입을 정의합니다.
+### Details:
+1. 각 카테고리별로 독립적인 모듈 파일 구조를 설계합니다 (예: apiUtils.ts, dateUtils.ts 등)
+2. 각 모듈에 포함될 함수들의 인터페이스와 반환 타입을 TypeScript로 정의합니다.
+3. 공통으로 사용되는 타입들은 별도의 types.ts 파일에 정의합니다.
+4. 모듈 간 의존성을 최소화하는 방향으로 설계하고, 순환 참조가 발생하지 않도록 합니다.
+5. 각 모듈의 public API를 명확히 정의하고 index.ts 파일을 통해 노출합니다.
+
+## 3. 유틸리티 모듈 구현 및 단위 테스트 [done]
+### Dependencies: 2.2
+### Description: 설계된 모듈 구조에 따라 각 카테고리별 유틸리티 함수를 구현하고 단위 테스트를 작성합니다.
+### Details:
+1. 각 카테고리별 모듈 파일을 생성하고 정의된 인터페이스에 맞게 함수들을 구현합니다.
+2. 함수마다 JSDoc 형식의 주석을 추가하여 사용 방법과 매개변수, 반환값을 명확히 문서화합니다.
+3. 각 함수에 대한 단위 테스트를 작성하여 예상대로 동작하는지 검증합니다.
+4. 에러 처리와 예외 상황에 대한 대응 로직을 구현합니다.
+5. 성능 최적화가 필요한 함수들을 식별하고 개선합니다.
+
+## 4. 기존 코드 리팩토링 및 유틸리티 모듈 적용 [done]
+### Dependencies: 2.3
+### Description: 기존 코드에서 중복된 유틸리티 함수들을 새로 구현한 모듈로 대체하고 리팩토링합니다.
+### Details:
+1. 기존 코드에서 중복 구현된 유틸리티 함수들을 식별합니다.
+2. 새로 구현한 유틸리티 모듈을 import하여 중복 코드를 대체합니다.
+3. 리팩토링 과정에서 발생할 수 있는 부작용을 최소화하기 위해 점진적으로 적용합니다.
+4. 각 변경사항에 대해 테스트를 실행하여 기능이 정상적으로 동작하는지 확인합니다.
+5. 리팩토링 완료 후 코드 리뷰를 통해 일관성과 품질을 검증합니다.
+6. 유틸리티 모듈 사용 가이드를 개발자 문서에 추가합니다.
+

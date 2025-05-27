@@ -1,0 +1,147 @@
+# Task ID: 9
+# Title: 요약 결과 표시 UI 구현
+# Status: pending
+# Dependencies: 5, 6
+# Priority: medium
+# Description: 서버에서 생성된 AI 요약 결과를 사용자에게 보기 좋게 표시하는 UI 컴포넌트를 구현합니다.
+# Details:
+1. components/SummaryResult.tsx 컴포넌트 구현
+2. 요약 텍스트 및 통계 정보 표시 레이아웃 설계
+3. 섹션별 구분 및 스타일링
+4. ReviewScreen에 통합
+
+```typescript
+// components/SummaryResult.tsx 예시
+import React from 'react';
+import { View, Text, StyleSheet, ScrollView } from 'react-native';
+
+type SummaryResultProps = {
+  summary: {
+    text: string;
+    statistics: {
+      total_reviews: number;
+      average_rating: number;
+      // 기타 통계 정보
+    };
+  };
+};
+
+const SummaryResult: React.FC<SummaryResultProps> = ({ summary }) => {
+  // 요약 텍스트를 섹션별로 분리하는 함수
+  const parseSummaryText = (text: string) => {
+    // 간단한 예시 - 실제로는 더 정교한 파싱 로직이 필요할 수 있음
+    const sections = text.split(/\d+\./).filter(section => section.trim().length > 0);
+    return sections.map(section => section.trim());
+  };
+  
+  const summaryParts = parseSummaryText(summary.text);
+  
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>AI 요약 결과</Text>
+      
+      <View style={styles.statisticsContainer}>
+        <Text style={styles.statisticsTitle}>통계 정보</Text>
+        <Text>분석된 리뷰: {summary.statistics.total_reviews}개</Text>
+        <Text>평균 평점: {summary.statistics.average_rating.toFixed(1)}/5.0</Text>
+      </View>
+      
+      <ScrollView style={styles.summaryContainer}>
+        {summaryParts.map((part, index) => (
+          <View key={index} style={styles.summarySection}>
+            <Text style={styles.sectionText}>{part}</Text>
+          </View>
+        ))}
+      </ScrollView>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    padding: 16,
+    backgroundColor: '#ffffff',
+    borderRadius: 8,
+    marginVertical: 10,
+    elevation: 2,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  statisticsContainer: {
+    backgroundColor: '#f5f5f5',
+    padding: 12,
+    borderRadius: 6,
+    marginBottom: 16,
+  },
+  statisticsTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  summaryContainer: {
+    maxHeight: 400,
+  },
+  summarySection: {
+    marginBottom: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  sectionText: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+});
+
+export default SummaryResult;
+
+// ReviewScreen.tsx에 통합
+// ...
+{summary && (
+  <SummaryResult summary={summary} />
+)}
+// ...
+```
+
+# Test Strategy:
+1. 다양한 요약 텍스트 형식으로 컴포넌트 렌더링 테스트
+2. 텍스트 파싱 로직의 정확성 검증
+3. 스크롤 동작 및 레이아웃 테스트
+4. 다양한 화면 크기에서의 반응형 레이아웃 테스트
+5. 긴 텍스트 처리 및 표시 확인
+6. 접근성 테스트(스크린 리더 호환성 등)
+
+# Subtasks:
+## 1. AI 요약 결과 데이터 파싱 및 구조화 [pending]
+### Dependencies: None
+### Description: AI가 생성한 요약 텍스트를 분석하고 의미 있는 섹션으로 구조화하는 로직 개발
+### Details:
+1. AI 요약 결과의 일반적인 형식과 패턴 분석
+2. 텍스트를 제목, 주요 포인트, 통계 데이터 등의 섹션으로 파싱하는 함수 개발
+3. 다양한 길이와 형식의 요약 텍스트를 처리할 수 있는 유연한 파싱 로직 구현
+4. 파싱된 데이터를 UI 컴포넌트에서 사용하기 쉬운 구조화된 객체로 변환
+
+## 2. 요약 결과 UI 컴포넌트 설계 및 구현 [pending]
+### Dependencies: 9.1
+### Description: 파싱된 AI 요약 데이터를 표시하기 위한 UI 컴포넌트 설계 및 개발
+### Details:
+1. 요약 결과를 효과적으로 표시할 수 있는 레이아웃 설계
+2. 주요 섹션(제목, 요약 내용, 통계 등)을 위한 개별 컴포넌트 개발
+3. 반응형 디자인 적용으로 다양한 화면 크기에 대응
+4. 접근성 고려(스크린 리더 지원, 키보드 네비게이션 등)
+5. 컴포넌트 스타일링 및 시각적 계층 구조 구현
+
+## 3. 요약 UI 컴포넌트 통합 및 상호작용 기능 구현 [pending]
+### Dependencies: 9.2
+### Description: 개발된 요약 UI 컴포넌트를 기존 애플리케이션에 통합하고 사용자 상호작용 기능 추가
+### Details:
+1. 요약 컴포넌트를 메인 애플리케이션에 통합
+2. 요약 확장/축소, 특정 섹션 하이라이트 등의 사용자 상호작용 기능 구현
+3. 요약 데이터 로딩 상태 및 오류 처리 구현
+4. 성능 최적화(불필요한 리렌더링 방지, 메모이제이션 등)
+5. 다양한 브라우저 및 디바이스에서의 테스트 및 디버깅
+

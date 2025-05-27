@@ -1,0 +1,109 @@
+# Task ID: 8
+# Title: LLM 요약 생성 로직 최적화
+# Status: pending
+# Dependencies: 7
+# Priority: medium
+# Description: 클라이언트에서 받은 샘플 데이터를 기반으로 LLM을 사용하여 요약을 생성하는 로직을 최적화합니다.
+# Details:
+1. llm.py 파일 수정
+2. 샘플링된 리뷰 데이터를 직접 처리하는 로직 구현
+3. OpenAI API 호출 최적화
+4. 토큰 제한 및 요약 품질 개선
+
+```python
+# llm.py 수정 예시
+import openai
+import os
+import json
+from typing import List, Dict, Any
+
+# OpenAI API 설정
+openai.api_key = os.environ.get('OPENAI_API_KEY')
+
+def generate_summary_with_llm(sampled_reviews: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Generate summary from sampled reviews using OpenAI API"""
+    # 리뷰 텍스트 추출 및 포맷팅
+    review_texts = [f"리뷰 {i+1}: {review['content']} (평점: {review['rating']})" 
+                   for i, review in enumerate(sampled_reviews)]
+    
+    # 리뷰 텍스트 결합 (토큰 제한 고려)
+    combined_reviews = "\n\n".join(review_texts)
+    
+    # 프롬프트 구성
+    prompt = f"""다음은 모바일 앱에 대한 사용자 리뷰 샘플입니다. 이 리뷰들을 분석하여 다음 정보를 포함한 요약을 생성해주세요:
+
+1. 주요 긍정적 피드백
+2. 주요 부정적 피드백
+3. 개선이 필요한 영역
+4. 사용자 만족도 전반적 평가
+5. 주요 기능별 평가
+
+리뷰:
+{combined_reviews}
+
+요약:"""
+    
+    # OpenAI API 호출
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",  # 또는 적절한 모델 선택
+            messages=[
+                {"role": "system", "content": "당신은 앱 리뷰를 분석하는 AI 어시스턴트입니다. 사용자 피드백을 객관적으로 요약하고 통찰력 있는 분석을 제공합니다."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=1000,
+            temperature=0.5
+        )
+        
+        summary_text = response.choices[0].message.content.strip()
+        
+        # 요약 결과 구조화
+        summary_result = {
+            "text": summary_text,
+            "statistics": {
+                "total_reviews": len(sampled_reviews),
+                "average_rating": sum(review['rating'] for review in sampled_reviews) / len(sampled_reviews) if sampled_reviews else 0,
+                # 기타 통계 정보
+            }
+        }
+        
+        return summary_result
+    
+    except Exception as e:
+        print(f"Error generating summary with LLM: {str(e)}")
+        raise
+```
+
+# Test Strategy:
+1. 다양한 리뷰 샘플로 요약 생성 테스트
+2. OpenAI API 응답 처리 및 에러 핸들링 검증
+3. 토큰 제한 초과 시 동작 확인
+4. 요약 품질 평가(정확성, 관련성, 유용성)
+5. 다양한 언어의 리뷰 처리 테스트
+6. 성능 및 응답 시간 측정
+
+# Subtasks:
+## 1. 입력 데이터 전처리 최적화 [pending]
+### Dependencies: None
+### Description: LLM에 전달하기 전 입력 데이터를 효율적으로 처리하는 방법 설계
+### Details:
+리뷰 텍스트 정제, 중요 정보 추출, 토큰 수 최적화를 위한 텍스트 압축 기법 구현, 다양한 리뷰 형식(긴 리뷰, 짧은 리뷰, 다국어 리뷰 등)에 대한 전처리 로직 개발, 불필요한 정보 필터링 방법론 수립
+
+## 2. 효과적인 프롬프트 설계 [pending]
+### Dependencies: 8.1
+### Description: 요약 품질을 극대화하는 프롬프트 엔지니어링 전략 개발
+### Details:
+다양한 프롬프트 템플릿 실험 및 평가, 요약 품질 향상을 위한 프롬프트 구조화, 토큰 제한 내에서 최대 성능을 발휘하는 프롬프트 최적화, 프롬프트 버전 관리 시스템 구축, 리뷰 특성에 따른 동적 프롬프트 생성 로직 개발
+
+## 3. OpenAI API 호출 최적화 [pending]
+### Dependencies: 8.1, 8.2
+### Description: API 호출 비용과 성능을 균형있게 관리하는 전략 구현
+### Details:
+배치 처리를 통한 API 호출 최소화, 적절한 모델 선택 로직 구현(GPT-3.5 vs GPT-4), 토큰 사용량 모니터링 및 제어 시스템 개발, 요청 실패 시 재시도 메커니즘 구현, 비동기 처리를 통한 처리량 향상, 캐싱 전략 수립
+
+## 4. 요약 결과 후처리 및 품질 평가 [pending]
+### Dependencies: 8.3
+### Description: LLM이 생성한 요약 결과를 정제하고 품질을 평가하는 시스템 개발
+### Details:
+요약 결과 포맷팅 및 정규화, 요약 품질 자동 평가 메트릭 구현, 사용자 피드백 기반 요약 품질 개선 루프 설계, 요약 결과의 일관성 검증 로직 개발, 다양한 요약 스타일(간결형, 상세형 등) 지원을 위한 후처리 로직 구현
+

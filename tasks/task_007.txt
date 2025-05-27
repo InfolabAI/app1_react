@@ -1,0 +1,113 @@
+# Task ID: 7
+# Title: Lambda 함수에서 샘플링 기능 제거
+# Status: pending
+# Dependencies: 6
+# Priority: medium
+# Description: AWS Lambda 함수에서 기존 샘플링 기능을 제거하고, 클라이언트에서 받은 샘플 데이터를 처리하도록 수정합니다.
+# Details:
+1. lambda_function.py 파일에서 샘플링 관련 코드 제거
+2. 클라이언트에서 받은 샘플 데이터를 처리하는 로직 추가
+3. generate_and_save_summary 함수 수정
+4. 기존 캐싱 로직 유지
+
+```python
+# lambda_function.py 수정 예시
+
+# 기존 샘플링 관련 코드 제거
+# def sample_reviews(reviews, ...): ... 등의 함수 제거
+
+# generate_and_save_summary 함수 수정
+def generate_and_save_summary(app_id, end_date, sampled_reviews=None):
+    """Generate summary for app reviews and save to DynamoDB"""
+    # 기존 요약이 있는지 확인
+    existing_summary = get_summary_by_app_id_and_end_date(app_id, end_date)
+    if existing_summary:
+        logger.info(f"Found existing summary for app_id={app_id}, end_date={end_date}")
+        return existing_summary
+    
+    # 클라이언트에서 샘플링된 리뷰 데이터가 없는 경우 에러 반환
+    if not sampled_reviews:
+        logger.error("No sampled reviews provided")
+        raise ValueError("Sampled reviews are required for summary generation")
+    
+    # LLM을 사용하여 요약 생성
+    summary = generate_summary_with_llm(sampled_reviews)
+    
+    # 요약 결과 저장
+    save_summary_to_dynamodb(app_id, end_date, summary)
+    
+    return summary
+
+# Lambda 핸들러 함수 수정
+def lambda_handler(event, context):
+    """Lambda function handler"""
+    try:
+        # API Gateway에서 전달된 이벤트 파싱
+        body = json.loads(event.get('body', '{}'))
+        app_id = body.get('app_id')
+        end_date = body.get('end_date')
+        sampled_reviews = body.get('sampled_reviews')
+        
+        if not app_id or not end_date:
+            return {
+                'statusCode': 400,
+                'body': json.dumps({'error': 'Missing required parameters: app_id, end_date'})
+            }
+        
+        # 요약 생성 및 반환
+        summary = generate_and_save_summary(app_id, end_date, sampled_reviews)
+        
+        return {
+            'statusCode': 200,
+            'body': json.dumps({'summary': summary})
+        }
+    except Exception as e:
+        logger.error(f"Error in lambda_handler: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json.dumps({'error': str(e)})
+        }
+```
+
+# Test Strategy:
+1. 수정된 Lambda 함수의 로컬 테스트
+2. 다양한 입력 파라미터로 함수 호출 테스트
+3. 클라이언트에서 전송한 샘플 데이터 처리 검증
+4. 에러 처리 및 응답 형식 확인
+5. 캐싱 메커니즘 동작 확인
+6. AWS Lambda 환경에서의 통합 테스트
+
+# Subtasks:
+## 1. 기존 Lambda 함수 코드 분석 [pending]
+### Dependencies: None
+### Description: 현재 Lambda 함수의 코드를 분석하여 샘플링 기능과 데이터 처리 로직을 파악합니다.
+### Details:
+1. Lambda 함수의 전체 코드 구조 파악
+2. 샘플링 관련 코드 부분 식별
+3. 데이터 처리 흐름 및 로직 이해
+4. 클라이언트로부터 받는 데이터 형식 확인
+5. 캐싱 메커니즘 분석
+6. 다른 기능과의 의존성 파악
+
+## 2. Lambda 함수 코드 수정 [pending]
+### Dependencies: 7.1
+### Description: 샘플링 기능을 제거하고 클라이언트에서 받은 데이터를 처리하도록 Lambda 함수 코드를 수정합니다.
+### Details:
+1. 샘플링 관련 코드 제거
+2. 클라이언트에서 받은 데이터를 처리하는 로직 구현
+3. 입력 데이터 유효성 검사 추가
+4. 기존 캐싱 로직 유지 및 필요시 수정
+5. 에러 처리 로직 보강
+6. 응답 형식 유지 또는 필요시 수정
+
+## 3. 수정된 Lambda 함수 테스트 및 배포 [pending]
+### Dependencies: 7.2
+### Description: 수정된 Lambda 함수를 테스트하고 성공적으로 작동하는지 확인한 후 배포합니다.
+### Details:
+1. 로컬 환경에서 단위 테스트 수행
+2. 다양한 입력 케이스에 대한 테스트 시나리오 작성 및 실행
+3. 클라이언트 애플리케이션과의 통합 테스트
+4. 성능 테스트 및 최적화
+5. 테스트 환경에 배포 및 검증
+6. 프로덕션 환경에 배포 및 모니터링 설정
+
